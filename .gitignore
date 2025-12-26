@@ -1,0 +1,34 @@
+# Build outputs
+bin/
+obj/
+*.pdb
+*.cache
+
+# Keep Release folder structure (it's the distributable)
+!Release/
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Decompiled game code - NEVER commit (copyright)
+# These folders may be created by the DecompileGameCode.ps1 tool
+Analysis/
+7D2DCodebase/
+GameCode/
+Decompiled/
+
+# NuGet
+packages/
+*.nupkg
+
+# Backup files
+*.bak
+*.orig
+*~

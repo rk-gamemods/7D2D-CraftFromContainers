@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<xml>
+	<Name value="ProxiCraft" />
+	<DisplayName value="ProxiCraft - Proximity Container Crafting" />
+	<Description value="Craft, reload, refuel, and repair using items from nearby containers. Features: Challenge tracker integration (container items count toward gather challenges), balanced 15-block default range, real-time updates, enhanced mod compatibility, and robust error handling. Inspired by the CraftFromContainers concept." />
+	<Author value="rk-gamemods" />
+	<Version value="1.0.0" />
+	<Website value="https://github.com/rk-gamemods/7D2D-ProxiCraft" />
+</xml>

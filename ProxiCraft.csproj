@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>ProxiCraft</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <OutputPath>Release\ProxiCraft\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- Disable nullable warnings for now - we handle null safety manually -->
+    <Nullable>disable</Nullable>
+    <NoWarn>$(NoWarn);CS8600;CS8602;CS8604;CS8618</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <GamePath>C:\Steam\steamapps\common\7 Days To Die</GamePath>
+    <ManagedPath>$(GamePath)\7DaysToDie_Data\Managed</ManagedPath>
+    <HarmonyPath>$(GamePath)\Mods\0_TFP_Harmony</HarmonyPath>
+  </PropertyGroup>
+
+  <!-- Source files -->
+  <ItemGroup>
+    <Compile Include="ProxiCraft\ProxiCraft.cs" />
+    <Compile Include="ProxiCraft\ContainerManager.cs" />
+    <Compile Include="ProxiCraft\ModConfig.cs" />
+    <Compile Include="ProxiCraft\NetPackagePCLock.cs" />
+    <Compile Include="ProxiCraft\ModCompatibility.cs" />
+    <Compile Include="ProxiCraft\SafePatcher.cs" />
+    <Compile Include="ProxiCraft\AdaptivePatching.cs" />
+    <Compile Include="ProxiCraft\ConsoleCmdProxiCraft.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(ManagedPath)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(ManagedPath)\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(ManagedPath)\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(ManagedPath)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(ManagedPath)\Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(HarmonyPath)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
