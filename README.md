@@ -38,7 +38,7 @@ warn you if it detects conflicting mods.
 ## Installation
 
 ### Step 1: Download
-Download `ProxiCraft.zip` from the [Releases](../../releases/latest) page.
+Download [`ProxiCraft.zip`](Release/ProxiCraft.zip) (click "Download raw file" button).
 
 ### Step 2: Extract
 Extract the zip file. You should have a `ProxiCraft` folder containing:
