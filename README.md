@@ -2,6 +2,8 @@
 
 A 7 Days to Die mod that allows crafting, reloading, refueling, and repairs using items from nearby storage containers.
 
+## ⬇️ [Download ProxiCraft.zip](https://github.com/rk-gamemods/7D2D-ProxiCraft/raw/master/Release/ProxiCraft.zip)
+
 ## Features
 
 - ✅ **Challenge Tracker Integration** - Container items count toward challenges like "Gather 4 Wood"
@@ -37,41 +39,9 @@ warn you if it detects conflicting mods.
 
 ## Installation
 
-### Step 1: Download
-Download [`ProxiCraft.zip`](Release/ProxiCraft.zip) (click "Download raw file" button).
-
-### Step 2: Extract
-Extract the zip file. You should have a `ProxiCraft` folder containing:
-- `ProxiCraft.dll`
-- `ModInfo.xml`
-- `config.json`
-
-### Step 3: Install
-Copy the entire `ProxiCraft` folder to your Mods directory:
-
-| Location | Path |
-|----------|------|
-| **Game folder** | `C:\Program Files (x86)\Steam\steamapps\common\7 Days To Die\Mods\` |
-| **AppData** | `%AppData%\7DaysToDie\Mods\` |
-
-Either location works. Create the `Mods` folder if it doesn't exist.
-
-Your final structure should be:
-```
-Mods/
-└── ProxiCraft/
-    ├── ProxiCraft.dll
-    ├── ModInfo.xml
-    └── config.json
-```
-
-### Step 4: Disable EAC
-Anti-Cheat must be disabled for DLL mods to load:
-- Launch 7 Days To Die from Steam
-- Select **"Show Game Launcher"** in Steam launch options, then choose **"Start without Anti-Cheat"**
-- Or add `-noeac` to Steam launch options
-
-> **Building from source?** See the [Building](#building) section below.
+1. Download the zip using the link above
+2. Extract to `7 Days To Die/Mods/ProxiCraft/`
+3. Ensure EAC is disabled (required for all DLL mods)
 
 ## Project Structure
 
