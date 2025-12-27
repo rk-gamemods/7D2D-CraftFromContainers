@@ -43,6 +43,17 @@ warn you if it detects conflicting mods.
 2. Extract to `7 Days To Die/Mods/ProxiCraft/`
 3. Ensure EAC is disabled (required for all DLL mods)
 
+## Multiplayer Status
+
+**Untested in multiplayer.** The mod includes lock synchronization code but has not been validated in multiplayer environments.
+
+**Expected behavior:**
+- Should work when players use **separate containers** at different locations
+- May have issues with **shared storage** that multiple players access
+- Race conditions possible if players craft simultaneously from the same container
+
+**Technical limitation:** All container locking is client-side. There is no server-side validation to prevent concurrent access, so item duplication or loss could occur with shared containers.
+
 ## Project Structure
 
 ```
