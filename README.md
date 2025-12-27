@@ -9,7 +9,7 @@ A 7 Days to Die mod that allows crafting, reloading, refueling, and repairs usin
 - ✅ **Challenge Tracker Integration** - Container items count toward challenges like "Gather 4 Wood"
 - ✅ **Balanced Default Range** - 15-block radius by default (configurable, -1 for unlimited)
 - ✅ **Real-time Updates** - Challenge counts update immediately when moving items
-- ✅ **Mod Compatibility** - Designed to work alongside backpack and UI mods
+- ✅ **Conflict-Aware** - Uses low-priority patches to minimize issues with other mods
 - ✅ **Robust Error Handling** - SafePatcher system prevents crashes
 
 ## Inspiration & Prior Art
@@ -191,20 +191,21 @@ This will output:
 
 ## Potential Mod Conflicts
 
-This mod may conflict with:
+ProxiCraft uses `Priority.Low` Harmony patches, meaning it runs *after* other mods to avoid breaking them. However, conflicts can still occur if another mod changes method signatures or return values that ProxiCraft depends on.
 
-### High Risk (Known Conflicts)
-- **CraftFromChests / PullFromContainers** - Similar functionality, will patch same methods
-- **AutoCraft** - May conflict with crafting methods
+### High Risk (Will Conflict)
+- **CraftFromChests / PullFromContainers / CraftFromContainersPlus** - Same functionality, patches same methods
+- **AutoCraft** - Modifies crafting methods
 
-### Medium Risk
-- **SMXui / SMXhud / SMXmenu** - UI overhauls may change window structures
-- **BiggerBackpack** - Changes inventory methods we patch
+### Medium Risk (Usually Fine)
+These mods patch some of the same classes but typically work alongside ProxiCraft:
+- **SMXui / SMXhud / SMXmenu** - UI overhauls (tested compatible in most cases)
+- **BiggerBackpack** - Changes inventory methods
 - **ExpandedStorage** - Changes TileEntity behavior
 
 ### Low Risk
 - **BetterVehicles** - May change vehicle fuel systems
-- Most other mods that don't modify crafting or inventory
+- Most mods that don't modify crafting or inventory
 
 ## Known Compatibility
 
