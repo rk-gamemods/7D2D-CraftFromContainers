@@ -57,4 +57,13 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+
+  <!-- Create release zip after build -->
+  <Target Name="CreateReleaseZip" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <Delete Files="$(ProjectDir)Release\ProxiCraft.zip" Condition="Exists('$(ProjectDir)Release\ProxiCraft.zip')" />
+    <ZipDirectory SourceDirectory="$(ProjectDir)Release\ProxiCraft"
+                  DestinationFile="$(ProjectDir)Release\ProxiCraft.zip"
+                  Overwrite="true" />
+    <Message Importance="High" Text="Created Release\ProxiCraft.zip" />
+  </Target>
 </Project>
