@@ -380,17 +380,46 @@ Examples:
                 
             case "report":
             case "full":
-                ShowPerfReport(detailed: true);
+                ShowPerfReport(detailed: true, saveToFile: true);
+                break;
+            
+            case "save":
+            case "export":
+            case "file":
+                SavePerfReportToFile();
                 break;
                 
             default:
                 // Show brief status
-                ShowPerfReport(detailed: false);
+                ShowPerfReport(detailed: false, saveToFile: false);
                 break;
         }
     }
 
-    private void ShowPerfReport(bool detailed)
+    private void SavePerfReportToFile()
+    {
+        try
+        {
+            string report = $"=== ProxiCraft Performance Report ===\n";
+            report += $"Generated: {System.DateTime.Now:yyyy-MM-dd HH:mm:ss}\n";
+            report += $"Profiler: {(PerformanceProfiler.IsEnabled ? "ENABLED" : "DISABLED")}\n\n";
+            report += PerformanceProfiler.GetReport();
+            
+            // Write to mod folder
+            string modPath = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+            string filePath = System.IO.Path.Combine(modPath, "perf_report.txt");
+            
+            System.IO.File.WriteAllText(filePath, report);
+            
+            return; // Called from ShowPerfReport, don't output again
+        }
+        catch (System.Exception ex)
+        {
+            ProxiCraft.LogWarning($"Failed to save perf report: {ex.Message}");
+        }
+    }
+
+    private void ShowPerfReport(bool detailed, bool saveToFile)
     {
         Output("=== ProxiCraft Performance ===");
         Output($"  Profiler: {(PerformanceProfiler.IsEnabled ? "ENABLED" : "DISABLED")}");
@@ -408,6 +437,15 @@ Examples:
             foreach (var line in report.Split('\n'))
             {
                 Output(line);
+            }
+            
+            // Auto-save to file for easy sharing
+            if (saveToFile)
+            {
+                SavePerfReportToFile();
+                string modPath = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+                Output("");
+                Output($"Report saved to: {System.IO.Path.Combine(modPath, "perf_report.txt")}");
             }
         }
         else
