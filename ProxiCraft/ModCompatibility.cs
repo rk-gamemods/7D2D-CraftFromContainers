@@ -48,6 +48,8 @@ public static class ModCompatibility
         { "ExtendedBackpack", "Inventory expansion - compatible (we use additive patching)" },
         { "BackpackButtons", "Backpack UI mod - compatible (we don't modify UI structure)" },
         { "Inventory", "Inventory mod - likely compatible (we use additive patching)" },
+        { "AGF-V2-Backpack72Plus", "AGF 72-slot backpack - compatible (tested)" },
+        { "AGF-V2-HUDPlus", "AGF HUD overhaul - compatible (tested)" },
     };
 
     // Track detected backpack mods for diagnostic purposes
