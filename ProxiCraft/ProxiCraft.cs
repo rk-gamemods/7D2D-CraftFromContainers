@@ -1518,6 +1518,19 @@ public class ProxiCraft : IModApi
                 {
                     ContainerManager.CurrentOpenContainer = lootable;
                     
+                    // Check if this is a drone's lootContainer
+                    // Drones have EntityId set on their lootContainer
+                    int entityId = lootable.EntityId;
+                    if (entityId != -1)
+                    {
+                        var entity = GameManager.Instance?.World?.GetEntity(entityId);
+                        if (entity is EntityDrone drone)
+                        {
+                            ContainerManager.CurrentOpenDrone = drone;
+                            FileLog($"[CACHE] OnOpen: Set open drone entityId={entityId}");
+                        }
+                    }
+                    
                     // Get world position - handle both TileEntity and ITileEntity (like TEFeatureStorage)
                     // ITileEntity has ToWorldPos() method, but TEFeatureStorage is NOT a TileEntity class
                     Vector3i pos = Vector3i.zero;
@@ -1554,6 +1567,7 @@ public class ProxiCraft : IModApi
         {
             ContainerManager.CurrentOpenContainer = null;
             ContainerManager.CurrentOpenContainerPos = Vector3i.zero;
+            ContainerManager.CurrentOpenDrone = null; // Clear drone reference too
             ContainerManager.InvalidateCache(); // Force recount without open container
             FileLog("[CACHE] OnClose: Cleared");
         }

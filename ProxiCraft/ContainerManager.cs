@@ -114,6 +114,15 @@ public static class ContainerManager
     // ====================================================================================
     public static EntityVehicle CurrentOpenVehicle { get; set; }
     
+    // ====================================================================================
+    // LIVE OPEN DRONE REFERENCE  
+    // ====================================================================================
+    // Drones use XUiC_LootContainer which sets CurrentOpenContainer. But we also need
+    // to track the drone entity itself to skip it in CountAllDroneItems.
+    // NOTE: drone.lootContainer.items and drone.bag.GetSlots() share the SAME array!
+    // ====================================================================================
+    public static EntityDrone CurrentOpenDrone { get; set; }
+    
     /// <summary>
     /// Forces the next container scan to refresh the cache.
     /// Call this when containers may have changed contents.
@@ -141,6 +150,7 @@ public static class ContainerManager
         CurrentOpenContainer = null;
         CurrentOpenContainerPos = Vector3i.zero;
         CurrentOpenVehicle = null;
+        CurrentOpenDrone = null;
     }
 
     /// <summary>
@@ -546,6 +556,8 @@ public static class ContainerManager
 
     /// <summary>
     /// Counts all items in player's drones and adds to cache.
+    /// NOTE: drone.lootContainer.items and drone.bag.GetSlots() share the SAME array!
+    /// We only count from lootContainer to avoid double-counting.
     /// </summary>
     private static void CountAllDroneItems(World world, Vector3 playerPos, ModConfig config)
     {
@@ -559,6 +571,11 @@ public static class ContainerManager
 
             try
             {
+                // Skip the currently open drone - it's counted via CurrentOpenContainer
+                // (drone storage opens via XUiC_LootContainer which sets CurrentOpenContainer)
+                if (CurrentOpenDrone != null && drone.entityId == CurrentOpenDrone.entityId)
+                    continue;
+                
                 if (config.range > 0f && Vector3.Distance(playerPos, drone.position) >= config.range)
                     continue;
                 
@@ -566,22 +583,8 @@ public static class ContainerManager
                 if (!drone.LocalPlayerIsOwner())
                     continue;
 
-                // Try bag first
-                var bag = drone.bag;
-                if (bag != null)
-                {
-                    var slots = bag.GetSlots();
-                    if (slots != null)
-                    {
-                        foreach (var stack in slots)
-                        {
-                            if (stack?.itemValue != null && !stack.IsEmpty())
-                                AddToCountCache(stack.itemValue.type, stack.count);
-                        }
-                    }
-                }
-
-                // Try loot container
+                // Count from lootContainer ONLY (not bag - they share the same items array!)
+                // See EntityDrone line 2230: base.lootContainer.items = bag.GetSlots();
                 var lootContainer = drone.lootContainer;
                 if (lootContainer?.items != null)
                 {
