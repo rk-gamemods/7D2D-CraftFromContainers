@@ -499,13 +499,13 @@ pc perf report   - Detailed timing report
 - **GetItemCount** averages 0.00ms (sub-microsecond when cached)
 - **RefreshStorages max 2.39ms** is the cold-cache first scan; subsequent calls average 0.44ms
 - **Full cache rebuild** takes only 0.15ms average
-- At 60fps (~16.6ms frame budget), worst-case 2.39ms uses only 14% of one frame
 
-**Headroom Assessment:**
-- High-end CPU tested leaves significant margin for slower systems
-- Even 10x slower CPU would keep worst-case under 24ms (still playable)
-- Cache efficiency (98.7%) means most operations are essentially free
-- Storage count scaling: ~20 sources at 0.15ms rebuild suggests ~100 sources would still be under 1ms
+**Marginal Overhead Assessment:**
+- ProxiCraft adds minimal overhead to whatever frame budget remains after base game + other mods
+- Worst-case 2.39ms spike happens once (cold cache), then operations stay under 0.5ms
+- Cache efficiency (98.7%) means most item queries add essentially zero overhead
+- The optimizations (squared distance, no allocations) keep per-operation costs minimal
+- Test hardware (9800X3D) is high-end; results on slower systems will vary, but the relative efficiency should hold
 
 ---
 
