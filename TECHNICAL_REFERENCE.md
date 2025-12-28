@@ -497,7 +497,7 @@ pc perf report   - Detailed timing report
 **Analysis:**
 - **6,627 item queries** handled with 98.7% cache hit rate
 - **GetItemCount** averages 0.00ms (sub-microsecond when cached)
-- **RefreshStorages max 2.39ms** is the cold-cache first scan; subsequent calls average 0.44ms
+- **RefreshStorages** cold-cache first scan: 2.39ms; subsequent 7 calls average 0.16ms
 - **Full cache rebuild** takes only 0.15ms average
 
 **Marginal Overhead Assessment:**
