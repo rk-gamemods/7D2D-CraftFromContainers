@@ -1,12 +1,22 @@
 {
   "modEnabled": true,
   "isDebug": false,
-  "enableForRepairAndUpgrade": true,
-  "enableForTrader": true,
-  "enableForRefuel": true,
-  "enableForReload": true,
-  "enableForQuests": true,
-  "enableFromVehicles": true,
+  "range": 15,
+
+  "pullFromVehicles": true,
+  "pullFromDrones": true,
+  "pullFromDewCollectors": true,
+  "pullFromWorkstationOutputs": true,
   "allowLockedContainers": true,
-  "range": 15
+
+  "enableForCrafting": true,
+  "enableForReload": true,
+  "enableForRefuel": true,
+  "enableForTrader": true,
+  "enableForRepairAndUpgrade": true,
+  "enableForQuests": true,
+  "enableForPainting": true,
+  "enableForLockpicking": true,
+  "enableForGeneratorRefuel": true,
+  "enableForItemRepair": true
 }

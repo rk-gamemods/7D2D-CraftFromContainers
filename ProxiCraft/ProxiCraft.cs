@@ -130,6 +130,7 @@ public class ProxiCraft : IModApi
             {
                 string json = File.ReadAllText(configPath);
                 Config = JsonConvert.DeserializeObject<ModConfig>(json) ?? new ModConfig();
+                Config.MigrateDeprecatedSettings(); // Handle old config field names
                 Log("Configuration loaded from config.json");
             }
             else
