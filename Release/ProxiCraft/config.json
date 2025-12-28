@@ -1,6 +1,6 @@
 {
   "modEnabled": true,
-  "isDebug": true,
+  "isDebug": false,
   "enableForRepairAndUpgrade": true,
   "enableForTrader": true,
   "enableForRefuel": true,

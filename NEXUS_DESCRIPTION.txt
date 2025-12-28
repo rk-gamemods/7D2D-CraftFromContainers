@@ -1,0 +1,201 @@
+================================================================================
+BRIEF OVERVIEW (350 character limit)
+================================================================================
+
+Stop searching through storage boxes for crafting ingredients. ProxiCraft automatically pulls items from nearby containers for crafting, reloading, refueling, and repairs. Unlike similar mods, it works with challenge trackers - items in containers count toward quests. Configurable range and conflict detection included.
+
+Character count: 342
+
+================================================================================
+DETAILED DESCRIPTION (BBCode)
+================================================================================
+
+[size=4][b]What Does This Mod Do?[/b][/size]
+
+ProxiCraft lets you use items stored in nearby containers for:
+[list]
+[*]Crafting recipes
+[*]Reloading weapons
+[*]Refueling vehicles
+[*]Repairing and upgrading blocks
+[*]Buying from traders
+[/list]
+
+You no longer need to move items to your backpack first. If the item is in a container within range, the game will use it automatically.
+
+[line]
+
+[size=4][b]How Is This Different From CraftFromContainers?[/b][/size]
+
+ProxiCraft was inspired by [url="https://www.nexusmods.com/7daystodie/mods/2196"]CraftFromContainers by aedenthorn[/url]. If you want the original, check out their mod.
+
+ProxiCraft is a complete rewrite with a different architecture:
+
+[b]Less Likely to Conflict[/b]
+[list]
+[*][b]Low-Priority Patches[/b] - All patches use Harmony Priority.Low, so other mods run first. We add to their results instead of fighting them.
+[*][b]Additive Design[/b] - We add container items to inventory queries. We never replace or override what other mods do.
+[*][b]Postfix Over Transpiler[/b] - We use less invasive patch types when possible. Transpilers break easily; postfixes don't.
+[/list]
+
+[b]More Stable[/b]
+[list]
+[*][b]SafePatcher System[/b] - Every patch is wrapped in error handling. If something fails, that feature is disabled instead of crashing your game.
+[*][b]Graceful Degradation[/b] - If a game update changes something, the mod adapts. Features that can't work are turned off automatically.
+[*][b]Null Safety[/b] - Defensive coding throughout. No crashes from unexpected game states.
+[/list]
+
+[b]More Features[/b]
+[list]
+[*][b]Challenge Tracker Integration[/b] - Container items count toward "Gather X" quests. This is not available in other versions.
+[*][b]Balanced Default Range[/b] - 15 blocks by default instead of unlimited. Better for gameplay balance.
+[*][b]Per-Feature Control[/b] - Enable or disable crafting, reloading, refueling, and trading separately.
+[*][b]Console Diagnostics[/b] - Run [b]pc status[/b], [b]pc test[/b], [b]pc conflicts[/b] to troubleshoot issues.
+[*][b]Container Caching[/b] - Performance optimized. Limits scanning to 10 times per second max.
+[/list]
+
+[b]Important:[/b] Use only ONE craft-from-containers mod. Remove CraftFromContainers or similar mods before using ProxiCraft.
+
+[line]
+
+[size=4][b]Requirements[/b][/size]
+
+[list]
+[*]7 Days to Die V2.5 (tested). Older versions may work but are untested.
+[*]EAC must be disabled (required for all DLL mods)
+[*]No other dependencies
+[/list]
+
+[line]
+
+[size=4][b]Installation[/b][/size]
+
+[list=1]
+[*]Back up your save files before installing any mod
+[*]Download the file and extract the zip
+[*]Copy the [b]ProxiCraft[/b] folder to your [b]7 Days To Die/Mods/[/b] folder
+[*]You should have: [b]Mods/ProxiCraft/ProxiCraft.dll[/b]
+[*]Launch the game with EAC disabled
+[/list]
+
+To disable EAC: Right-click the game in Steam > Properties > General. In the [b]Select Launch Option[/b] dropdown, choose [b]Launch Game without EAC[/b].
+
+To uninstall: Delete the [b]Mods/ProxiCraft/[/b] folder.
+
+[line]
+
+[size=4][b]Configuration[/b][/size]
+
+Edit [b]config.json[/b] in the mod folder to change settings:
+
+[code]
+{
+  "modEnabled": true,
+  "isDebug": false,
+  "range": 15,
+  "enableForReload": true,
+  "enableForRefuel": true,
+  "enableForTrader": true,
+  "enableForRepairAndUpgrade": true,
+  "enableForQuests": true,
+  "enableFromVehicles": true,
+  "allowLockedContainers": true
+}
+[/code]
+
+[b]Range Settings[/b]
+[list]
+[*][b]range[/b] - How far to search for containers (in blocks). Default is 15, which covers a typical base floor. Set to -1 for unlimited (searches all loaded chunks, may cause lag). Set higher if you have a large base.
+[/list]
+
+[b]Feature Toggles[/b]
+[list]
+[*][b]enableForReload[/b] - Pull ammo from containers when reloading weapons.
+[*][b]enableForRefuel[/b] - Pull gas cans from containers when refueling vehicles.
+[*][b]enableForTrader[/b] - Use dukes from containers when buying from traders. Only useful if you store currency near a trader or use unlimited range.
+[*][b]enableForRepairAndUpgrade[/b] - Pull materials from containers when repairing or upgrading blocks.
+[*][b]enableForQuests[/b] - Count container items toward "Gather X" challenge objectives.
+[*][b]enableFromVehicles[/b] - Include parked vehicle storage in the search.
+[*][b]allowLockedContainers[/b] - Use items from password-locked containers. Only works on containers you have access to.
+[/list]
+
+[b]Debug[/b]
+[list]
+[*][b]isDebug[/b] - Enable verbose logging. Turn this on when troubleshooting, but leave off for normal play (reduces log spam).
+[/list]
+
+[line]
+
+[size=4][b]Console Commands[/b][/size]
+
+Press F1 to open the console, then type:
+[list]
+[*][b]pc status[/b] - Check if the mod is working
+[*][b]pc test[/b] - See what containers the mod can find
+[*][b]pc diag[/b] - Full diagnostic report
+[*][b]pc conflicts[/b] - Check for problems with other mods
+[*][b]pc toggle[/b] - Turn the mod on or off
+[*][b]pc refresh[/b] - Clear the container cache
+[/list]
+
+[line]
+
+[size=4][b]Mod Compatibility[/b][/size]
+
+[b]Tested Compatible:[/b]
+[list]
+[*]AGF HUDPlus
+[*]AGF Backpack 72 Slots
+[*]TechFreqs 144-Slot Backpack
+[/list]
+
+[b]Known Conflicts (do not use together):[/b]
+[list]
+[*]CraftFromContainers
+[*]CraftFromContainersPlus
+[*]CraftFromChests
+[*]PullFromContainers
+[/list]
+
+[b]May Work (not tested):[/b]
+[list]
+[*]SMXui / SMXhud - UI overhauls may change window structures
+[*]Other backpack mods - We use low-priority patches to avoid conflicts
+[/list]
+
+If you find a mod conflict, please report it so we can update this list.
+
+[line]
+
+[size=4][b]Multiplayer[/b][/size]
+
+Not tested in multiplayer. The mod may work, but shared containers could cause problems if two players craft from the same container at the same time.
+
+[line]
+
+[size=4][b]Disclaimer[/b][/size]
+
+[list]
+[*]Always back up your save files before installing mods
+[*]This mod is provided as-is with no warranty
+[*]We are not responsible for any lost or damaged saves
+[*]Use at your own risk
+[/list]
+
+[line]
+
+[size=4][b]Source Code[/b][/size]
+
+This mod is open source under the MIT license. You are free to modify and redistribute it.
+
+[url="https://github.com/rk-gamemods/7D2D-ProxiCraft"]View on GitHub[/url]
+
+[line]
+
+[size=4][b]Feedback & Bug Reports[/b][/size]
+
+Found a bug? Have a suggestion? Discovered a mod conflict?
+
+[url="https://github.com/rk-gamemods/7D2D-ProxiCraft/issues"]Report an issue on GitHub[/url]
+
+Or leave a comment on this mod page.
