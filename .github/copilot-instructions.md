@@ -93,10 +93,26 @@ Compress-Archive -Path .\Release\ProxiCraft -DestinationPath .\Release\ProxiCraf
 
 ### Decompiling Game Code
 
-Run the decompiler script when you need to reference game internals:
+The `7D2DCodebase` folder is its own git repository - each decompile becomes a commit, allowing you to diff between game versions.
+
+**First time or after game update:**
 ```powershell
 cd C:\Users\Admin\Documents\GIT\GameMods\7D2DMods
-.\DecompileGameCode.ps1 -Force   # -Force overwrites existing
+.\DecompileGameCode.ps1
+```
+
+The script will:
+1. Detect game version automatically
+2. Decompile assemblies
+3. Commit with game version as message
+4. Show diff summary of what changed (if previous version exists)
+
+**Comparing game versions:**
+```powershell
+cd 7D2DCodebase
+git log --oneline                           # See version history
+git diff HEAD~1 --stat                      # Summary of changed files
+git diff HEAD~1 -- XUiM_PlayerInventory.cs  # Specific file diff
 ```
 
 Output: `7D2DCodebase/Assembly-CSharp/` with ~4000+ .cs files
