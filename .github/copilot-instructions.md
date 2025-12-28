@@ -93,12 +93,13 @@ Compress-Archive -Path .\Release\ProxiCraft -DestinationPath .\Release\ProxiCraf
 
 ### Decompiling Game Code
 
+Use the [7D2D-DecompilerScript](https://github.com/rk-gamemods/7D2D-DecompilerScript) tool.
 The `7D2DCodebase` folder is its own git repository - each decompile becomes a commit, allowing you to diff between game versions.
 
 **First time or after game update:**
 ```powershell
 cd C:\Users\Admin\Documents\GIT\GameMods\7D2DMods
-.\DecompileGameCode.ps1
+.\Decompile-7D2D.ps1
 ```
 
 The script will:
