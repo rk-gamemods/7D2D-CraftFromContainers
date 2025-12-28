@@ -218,6 +218,11 @@ These mods patch some of the same classes. Conflicts are possible but not guaran
 - **BetterVehicles** - May change vehicle fuel systems
 - Most mods that don't modify crafting or inventory
 
+### Tested Compatible
+These mods have been confirmed to work alongside ProxiCraft:
+- **JaWoodleUI** - UI overhaul (v21.0)
+- **TechFreqsIncreasedBackpack** - Increases backpack to 144 slots
+
 ## Known Compatibility
 
 This mod uses Harmony to patch:
