@@ -66,6 +66,10 @@ public class ProxiCraft : IModApi
     // Harmony instance ID (unique to prevent conflicts)
     private static readonly string HarmonyId = "rkgamemods.proxicraft";
 
+    // Config file watcher for runtime config changes
+    private static FileSystemWatcher _configWatcher;
+    private static bool _reloadPending;
+
     #region IModApi Implementation
     
     public void InitMod(Mod modInstance)
@@ -77,7 +81,8 @@ public class ProxiCraft : IModApi
         Debug.Log("[ProxiCraft] InitMod starting...");
         
         LoadConfig();
-        
+        InitConfigWatcher();
+
         // Run compatibility checks first
         ModCompatibility.ScanForConflicts();
         
@@ -157,7 +162,134 @@ public class ProxiCraft : IModApi
     {
         return Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? ".";
     }
-    
+
+    /// <summary>
+    /// Initializes the FileSystemWatcher to monitor config.json for changes.
+    /// Allows runtime config changes without game restart.
+    /// </summary>
+    private static void InitConfigWatcher()
+    {
+        try
+        {
+            string configPath = Path.Combine(
+                Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? ".",
+                "config.json");
+            string configDir = Path.GetDirectoryName(configPath);
+
+            if (string.IsNullOrEmpty(configDir))
+            {
+                LogWarning("Could not determine config directory for file watcher");
+                return;
+            }
+
+            _configWatcher = new FileSystemWatcher(configDir, "config.json");
+            _configWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size;
+            _configWatcher.Changed += OnConfigFileChanged;
+            _configWatcher.EnableRaisingEvents = true;
+
+            FileLogInternal("Config file watcher enabled - changes will auto-reload");
+        }
+        catch (Exception ex)
+        {
+            LogWarning($"Could not enable config file watcher: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Handles config file change events with debouncing to avoid multiple reloads.
+    /// </summary>
+    private static void OnConfigFileChanged(object sender, FileSystemEventArgs e)
+    {
+        // Debounce - file may be written multiple times in rapid succession
+        if (_reloadPending) return;
+        _reloadPending = true;
+
+        // Delay reload slightly to allow file write to complete
+        // Use ThreadManager for Unity thread safety
+        ThreadManager.AddSingleTask(info =>
+        {
+            System.Threading.Thread.Sleep(500);
+            try
+            {
+                ReloadConfig();
+            }
+            catch (Exception ex)
+            {
+                LogError($"Config reload failed: {ex.Message}");
+            }
+            finally
+            {
+                _reloadPending = false;
+            }
+        });
+    }
+
+    /// <summary>
+    /// Reloads configuration from config.json at runtime.
+    /// Called by file watcher or console command.
+    /// </summary>
+    public static void ReloadConfig()
+    {
+        try
+        {
+            string configPath = Path.Combine(
+                Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? ".",
+                "config.json");
+
+            if (!File.Exists(configPath))
+            {
+                LogWarning("Config file not found - using current settings");
+                return;
+            }
+
+            string json = File.ReadAllText(configPath);
+            var newConfig = JsonConvert.DeserializeObject<ModConfig>(json);
+
+            if (newConfig == null)
+            {
+                LogWarning("Failed to parse config.json - using current settings");
+                return;
+            }
+
+            // Store old values for comparison
+            bool wasEnabled = Config?.modEnabled ?? false;
+            float oldRange = Config?.range ?? 15f;
+
+            // Apply new config
+            newConfig.MigrateDeprecatedSettings();
+            Config = newConfig;
+
+            // Invalidate caches if range changed
+            if (Math.Abs(Config.range - oldRange) > 0.01f)
+            {
+                ContainerManager.InvalidateCache();
+                ContainerManager.ClearCache();
+                Log($"Range changed from {oldRange} to {Config.range} - cache cleared");
+            }
+
+            Log("Configuration reloaded successfully");
+
+            if (Config.modEnabled != wasEnabled)
+            {
+                Log($"Mod is now {(Config.modEnabled ? "ENABLED" : "DISABLED")}");
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to reload config: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Gets the config file path.
+    /// </summary>
+    public static string GetConfigPath()
+    {
+        return Path.Combine(
+            Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? ".",
+            "config.json");
+    }
+
     #endregion
 
     #region Logging
@@ -372,6 +504,39 @@ public class ProxiCraft : IModApi
         catch (Exception ex)
         {
             LogWarning($"Error removing items from containers: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Triggers a refresh of the recipe tracker window if it exists and is visible.
+    /// Called when container contents change to update ingredient counts in real-time.
+    /// </summary>
+    public static void RefreshRecipeTracker()
+    {
+        if (!Config?.modEnabled == true || !Config?.enableRecipeTrackerUpdates == true)
+            return;
+
+        try
+        {
+            var player = GameManager.Instance?.World?.GetPrimaryPlayer();
+            if (player == null)
+                return;
+
+            var xui = LocalPlayerUI.GetUIForPlayer(player)?.xui;
+            if (xui == null)
+                return;
+
+            // Find the recipe tracker window
+            var recipeTracker = xui.GetChildByType<XUiC_RecipeTrackerWindow>();
+            if (recipeTracker != null)
+            {
+                recipeTracker.IsDirty = true;
+                FileLog("[REFRESH] Marked recipe tracker as dirty");
+            }
+        }
+        catch (Exception ex)
+        {
+            FileLog($"RefreshRecipeTracker error: {ex.Message}");
         }
     }
 
@@ -1148,6 +1313,119 @@ public class ProxiCraft : IModApi
         }
     }
 
+    // ====================================================================================
+    // TRADER SELLING SUPPORT
+    // ====================================================================================
+    // Allows selling items from nearby containers to traders.
+    // Uses the "pull to inventory" approach:
+    // 1. When selling more than the player has in the UI slot, pull from containers first
+    // 2. The sell operation then proceeds normally with the combined items
+    // ====================================================================================
+
+    /// <summary>
+    /// Patch ItemActionEntrySell.OnActivated to pull items from containers before selling.
+    /// Uses POSTFIX to add container items to the total available for selling.
+    /// </summary>
+    [HarmonyPatch(typeof(ItemActionEntrySell), "OnActivated")]
+    [HarmonyPriority(Priority.High)] // Run before vanilla to have items ready
+    private static class ItemActionEntrySell_OnActivated_Patch
+    {
+        public static void Prefix(ItemActionEntrySell __instance)
+        {
+            if (!Config?.modEnabled == true || !Config?.enableTraderSelling == true)
+                return;
+
+            try
+            {
+                // Get the ItemController field from BaseItemActionEntry
+                var itemControllerField = typeof(BaseItemActionEntry).GetField("ItemController",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var itemController = itemControllerField?.GetValue(__instance) as XUiController;
+
+                var xUiC_ItemStack = itemController as XUiC_ItemStack;
+                if (xUiC_ItemStack?.ItemStack == null || xUiC_ItemStack.ItemStack.IsEmpty())
+                    return;
+
+                // Get the InfoWindow field to access BuySellCounter
+                var infoWindow = xUiC_ItemStack.InfoWindow;
+                if (infoWindow?.BuySellCounter == null)
+                    return;
+
+                int requestedCount = infoWindow.BuySellCounter.Count;
+                int slotCount = xUiC_ItemStack.ItemStack.count;
+
+                LogDebug($"Trader sell: Requested {requestedCount}, slot has {slotCount}");
+
+                // If selling more than in slot, try to pull from containers first
+                if (requestedCount > slotCount)
+                {
+                    int needed = requestedCount - slotCount;
+
+                    // Pull items from containers into the item stack
+                    int pulled = ContainerManager.RemoveItems(Config, xUiC_ItemStack.ItemStack.itemValue, needed);
+
+                    if (pulled > 0)
+                    {
+                        xUiC_ItemStack.ItemStack.count += pulled;
+                        xUiC_ItemStack.ForceRefreshItemStack();
+                        LogDebug($"Trader sell: Pulled {pulled} items from containers");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogWarning($"Error in trader sell patch: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Patch ItemActionEntrySell.RefreshEnabled to show max count including containers.
+    /// Uses POSTFIX to update the BuySellCounter.MaxCount after vanilla calculation.
+    /// </summary>
+    [HarmonyPatch(typeof(ItemActionEntrySell), "RefreshEnabled")]
+    [HarmonyPriority(Priority.Low)]
+    private static class ItemActionEntrySell_RefreshEnabled_Patch
+    {
+        public static void Postfix(ItemActionEntrySell __instance)
+        {
+            if (!Config?.modEnabled == true || !Config?.enableTraderSelling == true)
+                return;
+
+            try
+            {
+                // Get the ItemController field from BaseItemActionEntry
+                var itemControllerField = typeof(BaseItemActionEntry).GetField("ItemController",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var itemController = itemControllerField?.GetValue(__instance) as XUiController;
+
+                var xUiC_ItemStack = itemController as XUiC_ItemStack;
+                if (xUiC_ItemStack?.ItemStack == null || xUiC_ItemStack.ItemStack.IsEmpty())
+                    return;
+
+                // Get the InfoWindow field to access BuySellCounter
+                var infoWindow = xUiC_ItemStack.InfoWindow;
+                if (infoWindow?.BuySellCounter == null)
+                    return;
+
+                // Get container count for this item
+                int containerCount = ContainerManager.GetItemCount(Config, xUiC_ItemStack.ItemStack.itemValue);
+
+                if (containerCount > 0)
+                {
+                    int currentMax = infoWindow.BuySellCounter.MaxCount;
+                    int newMax = AdaptivePatching.SafeAddCount(currentMax, containerCount);
+                    infoWindow.BuySellCounter.MaxCount = newMax;
+                    LogDebug($"Trader sell: Updated max count from {currentMax} to {newMax} (+{containerCount} from containers)");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogWarning($"Error in trader sell RefreshEnabled patch: {ex.Message}");
+            }
+        }
+    }
+
     #endregion
 
     #region Harmony Patches - Challenge Objective Support
@@ -1576,7 +1854,7 @@ public class ProxiCraft : IModApi
     /// <summary>
     /// When a container slot changes, fire the DragAndDropItemChanged event.
     /// Challenges already listen to this event, so they will recount items.
-    /// Also invalidates item count cache for fresh data.
+    /// Also invalidates item count cache for fresh data and refreshes recipe tracker.
     /// </summary>
     [HarmonyPatch(typeof(XUiC_LootContainer), "HandleLootSlotChangedEvent")]
     [HarmonyPriority(Priority.Low)]
@@ -1586,20 +1864,23 @@ public class ProxiCraft : IModApi
         {
             // Always invalidate cache when container contents change
             ContainerManager.InvalidateCache();
-            
+
+            // Refresh recipe tracker to show updated ingredient counts
+            RefreshRecipeTracker();
+
             if (!Config?.modEnabled == true || !Config?.enableForQuests == true)
                 return;
-            
+
             try
             {
                 var player = GameManager.Instance?.World?.GetPrimaryPlayer();
                 if (player == null)
                     return;
-                
+
                 // Fire DragAndDropItemChanged - challenges listen to this
                 var eventField = typeof(EntityPlayerLocal).GetField("DragAndDropItemChanged",
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                
+
                 if (eventField != null)
                 {
                     var eventDelegate = eventField.GetValue(player) as Delegate;
@@ -1723,6 +2004,7 @@ public class ProxiCraft : IModApi
     /// <summary>
     /// Track when items are moved in vehicle storage.
     /// Fire DragAndDropItemChanged to update challenge counts.
+    /// Also refreshes recipe tracker.
     /// </summary>
     [HarmonyPatch(typeof(XUiC_VehicleContainer), "HandleLootSlotChangedEvent")]
     [HarmonyPriority(Priority.Low)]
@@ -1732,20 +2014,23 @@ public class ProxiCraft : IModApi
         {
             // Always invalidate cache when vehicle contents change
             ContainerManager.InvalidateCache();
-            
+
+            // Refresh recipe tracker to show updated ingredient counts
+            RefreshRecipeTracker();
+
             if (!Config?.modEnabled == true || !Config?.enableForQuests == true)
                 return;
-            
+
             try
             {
                 var player = GameManager.Instance?.World?.GetPrimaryPlayer();
                 if (player == null)
                     return;
-                
+
                 // Fire DragAndDropItemChanged - challenges listen to this
                 var eventField = typeof(EntityPlayerLocal).GetField("DragAndDropItemChanged",
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                
+
                 if (eventField != null)
                 {
                     var eventDelegate = eventField.GetValue(player) as Delegate;
@@ -1829,6 +2114,7 @@ public class ProxiCraft : IModApi
     /// Track when items are moved in workstation OUTPUT grid.
     /// Fire DragAndDropItemChanged to update challenge counts.
     /// Only tracks output grid - we don't want to track input/fuel/tool grids.
+    /// Also refreshes recipe tracker.
     /// </summary>
     [HarmonyPatch(typeof(XUiC_WorkstationOutputGrid), "UpdateBackend")]
     [HarmonyPriority(Priority.Low)]
@@ -1838,20 +2124,23 @@ public class ProxiCraft : IModApi
         {
             // Always invalidate cache when workstation output changes
             ContainerManager.InvalidateCache();
-            
+
+            // Refresh recipe tracker to show updated ingredient counts
+            RefreshRecipeTracker();
+
             if (!Config?.modEnabled == true || !Config?.enableForQuests == true)
                 return;
-            
+
             try
             {
                 var player = GameManager.Instance?.World?.GetPrimaryPlayer();
                 if (player == null)
                     return;
-                
+
                 // Fire DragAndDropItemChanged - challenges listen to this
                 var eventField = typeof(EntityPlayerLocal).GetField("DragAndDropItemChanged",
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                
+
                 if (eventField != null)
                 {
                     var eventDelegate = eventField.GetValue(player) as Delegate;
@@ -2147,6 +2436,88 @@ public class ProxiCraft : IModApi
     //
     // No additional patches needed - this is just a documentation note.
     // ====================================================================================
+
+    #endregion
+
+    #region Harmony Patches - HUD Ammo Counter
+
+    // ====================================================================================
+    // HUD AMMO COUNTER
+    // ====================================================================================
+    //
+    // Shows total ammo from all in-range storage in the HUD stat bar.
+    // When the player has a ranged weapon equipped, the ammo counter shows:
+    // - Vanilla: Only ammo in player inventory (bag + toolbelt)
+    // - With this patch: Ammo in inventory + nearby containers
+    //
+    // Uses POSTFIX to add container ammo count after vanilla calculates inventory count.
+    // ====================================================================================
+
+    /// <summary>
+    /// Patch XUiC_HUDStatBar.updateActiveItemAmmo to include container ammo in HUD.
+    /// Uses POSTFIX to add container count after vanilla calculates inventory count.
+    /// </summary>
+    [HarmonyPatch(typeof(XUiC_HUDStatBar), "updateActiveItemAmmo")]
+    [HarmonyPriority(Priority.Low)]
+    private static class XUiC_HUDStatBar_updateActiveItemAmmo_Patch
+    {
+        // Cached field references for performance
+        private static FieldInfo _activeAmmoField;
+        private static FieldInfo _ammoCountField;
+
+        public static void Postfix(XUiC_HUDStatBar __instance)
+        {
+            if (!Config?.modEnabled == true || !Config?.enableHudAmmoCounter == true)
+                return;
+
+            // Safety check - don't run if game state isn't ready
+            if (!IsGameReady())
+                return;
+
+            try
+            {
+                // Cache reflection lookups (one-time per session)
+                if (_activeAmmoField == null)
+                {
+                    _activeAmmoField = typeof(XUiC_HUDStatBar).GetField("activeAmmoItemValue",
+                        BindingFlags.NonPublic | BindingFlags.Instance);
+                }
+                if (_ammoCountField == null)
+                {
+                    _ammoCountField = typeof(XUiC_HUDStatBar).GetField("currentAmmoCount",
+                        BindingFlags.NonPublic | BindingFlags.Instance);
+                }
+
+                if (_activeAmmoField == null || _ammoCountField == null)
+                {
+                    LogDebug("HUD ammo patch: Could not find required fields");
+                    return;
+                }
+
+                // Get the active ammo item type
+                var activeAmmo = _activeAmmoField.GetValue(__instance) as ItemValue;
+                if (activeAmmo == null || activeAmmo.type == 0)
+                    return;
+
+                // Get the current ammo count (from vanilla calculation)
+                int currentCount = (int)_ammoCountField.GetValue(__instance);
+
+                // Get container ammo count
+                int containerCount = ContainerManager.GetItemCount(Config, activeAmmo);
+
+                if (containerCount > 0)
+                {
+                    int newCount = AdaptivePatching.SafeAddCount(currentCount, containerCount);
+                    _ammoCountField.SetValue(__instance, newCount);
+                    LogDebug($"HUD ammo: {activeAmmo.ItemClass?.GetItemName()} = {currentCount} inventory + {containerCount} containers = {newCount}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"HUD ammo patch error: {ex.Message}");
+            }
+        }
+    }
 
     #endregion
 }

@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using Newtonsoft.Json;
 
 namespace ProxiCraft;
 
@@ -45,6 +48,14 @@ Commands:
   conflicts  - Show detected mod conflicts
   debug      - Toggle debug logging
 
+Config Commands:
+  pc config list              - List all settings with current values
+  pc config get <setting>     - Get a specific setting value
+  pc config set <setting> <v> - Set a setting value (temporary)
+  pc config save              - Save current settings to config.json
+  pc set <setting> <value>    - Shortcut for config set
+  pc get <setting>            - Shortcut for config get
+
 Performance Commands:
   pc perf          - Show brief performance status
   pc perf on       - Enable profiling (collects timing data)
@@ -54,10 +65,9 @@ Performance Commands:
 
 Examples:
   pc status
-  pc health
-  pc fullcheck
-  pc test
-  pc perf on
+  pc config list
+  pc set range 30
+  pc config save
   pc perf report
 ";
     }
@@ -117,7 +127,27 @@ Examples:
                 case "performance":
                     HandlePerfCommand(_params);
                     break;
-                    
+
+                case "config":
+                    HandleConfigCommand(_params);
+                    break;
+
+                case "set":
+                    // Shortcut: pc set <setting> <value>
+                    if (_params.Count >= 3)
+                        SetSetting(_params[1], _params[2]);
+                    else
+                        Output("Usage: pc set <setting> <value>");
+                    break;
+
+                case "get":
+                    // Shortcut: pc get <setting>
+                    if (_params.Count >= 2)
+                        GetSetting(_params[1]);
+                    else
+                        Output("Usage: pc get <setting>");
+                    break;
+
                 default:
                     Output($"Unknown command: {subCommand}. Use 'pc help' for available commands.");
                     break;
@@ -256,11 +286,9 @@ Examples:
     {
         try
         {
-            // Re-run config loading (would need to expose this method)
-            Output("Configuration reload requested.");
-            Output("Note: Full reload requires game restart. Some settings may not update.");
-            
-            // For now just show current config
+            ProxiCraft.ReloadConfig();
+            Output("Configuration reloaded from config.json");
+            Output("");
             ShowStatus();
         }
         catch (Exception ex)
@@ -424,13 +452,13 @@ Examples:
         Output("=== ProxiCraft Performance ===");
         Output($"  Profiler: {(PerformanceProfiler.IsEnabled ? "ENABLED" : "DISABLED")}");
         Output("");
-        
+
         if (!PerformanceProfiler.IsEnabled && !PerformanceProfiler.HasData)
         {
             Output("  No data collected. Use 'pc perf on' to enable profiling.");
             return;
         }
-        
+
         if (detailed)
         {
             string report = PerformanceProfiler.GetReport();
@@ -438,7 +466,7 @@ Examples:
             {
                 Output(line);
             }
-            
+
             // Auto-save to file for easy sharing
             if (saveToFile)
             {
@@ -453,4 +481,233 @@ Examples:
             Output(PerformanceProfiler.GetBriefStatus());
         }
     }
+
+    #region Config Commands
+
+    private void HandleConfigCommand(List<string> args)
+    {
+        if (args.Count < 2)
+        {
+            ShowConfigHelp();
+            return;
+        }
+
+        string subCmd = args[1].ToLowerInvariant();
+        switch (subCmd)
+        {
+            case "list":
+                ListAllSettings();
+                break;
+            case "get":
+                if (args.Count >= 3)
+                    GetSetting(args[2]);
+                else
+                    Output("Usage: pc config get <setting>");
+                break;
+            case "set":
+                if (args.Count >= 4)
+                    SetSetting(args[2], args[3]);
+                else
+                    Output("Usage: pc config set <setting> <value>");
+                break;
+            case "save":
+                SaveConfig();
+                break;
+            case "reset":
+                ResetConfigToDefaults(args.Count >= 3 && args[2].ToLowerInvariant() == "confirm");
+                break;
+            default:
+                ShowConfigHelp();
+                break;
+        }
+    }
+
+    private void ShowConfigHelp()
+    {
+        Output("Config Commands:");
+        Output("  pc config list              - List all settings with current values");
+        Output("  pc config get <setting>     - Get a specific setting value");
+        Output("  pc config set <setting> <v> - Set a setting value (temporary)");
+        Output("  pc config save              - Save current settings to config.json");
+        Output("  pc config reset confirm     - Reset all settings to defaults");
+        Output("");
+        Output("Shortcuts:");
+        Output("  pc set <setting> <value>    - Same as 'pc config set'");
+        Output("  pc get <setting>            - Same as 'pc config get'");
+    }
+
+    private void ListAllSettings()
+    {
+        var config = ProxiCraft.Config;
+        if (config == null)
+        {
+            OutputError("Configuration not loaded!");
+            return;
+        }
+
+        Output("=== ProxiCraft Configuration ===");
+        Output("");
+        Output("[General]");
+        Output($"  modEnabled = {config.modEnabled}");
+        Output($"  isDebug = {config.isDebug}");
+        Output($"  verboseHealthCheck = {config.verboseHealthCheck}");
+        Output($"  range = {config.range}");
+        Output("");
+        Output("[Storage Sources]");
+        Output($"  pullFromVehicles = {config.pullFromVehicles}");
+        Output($"  pullFromDrones = {config.pullFromDrones}");
+        Output($"  pullFromDewCollectors = {config.pullFromDewCollectors}");
+        Output($"  pullFromWorkstationOutputs = {config.pullFromWorkstationOutputs}");
+        Output($"  allowLockedContainers = {config.allowLockedContainers}");
+        Output("");
+        Output("[Features]");
+        Output($"  enableForCrafting = {config.enableForCrafting}");
+        Output($"  enableForReload = {config.enableForReload}");
+        Output($"  enableForRefuel = {config.enableForRefuel}");
+        Output($"  enableForTrader = {config.enableForTrader}");
+        Output($"  enableForQuests = {config.enableForQuests}");
+        Output($"  enableForPainting = {config.enableForPainting}");
+        Output($"  enableForLockpicking = {config.enableForLockpicking}");
+        Output($"  enableForGeneratorRefuel = {config.enableForGeneratorRefuel}");
+        Output($"  enableForItemRepair = {config.enableForItemRepair}");
+        Output($"  enableForRepairAndUpgrade = {config.enableForRepairAndUpgrade}");
+        Output("");
+        Output("[New Features]");
+        Output($"  enableHudAmmoCounter = {config.enableHudAmmoCounter}");
+        Output($"  enableRecipeTrackerUpdates = {config.enableRecipeTrackerUpdates}");
+        Output($"  enableTraderSelling = {config.enableTraderSelling}");
+        Output($"  respectLockedSlots = {config.respectLockedSlots}");
+    }
+
+    private void GetSetting(string settingName)
+    {
+        var config = ProxiCraft.Config;
+        if (config == null)
+        {
+            OutputError("Configuration not loaded!");
+            return;
+        }
+
+        var field = typeof(ModConfig).GetField(settingName,
+            BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+
+        if (field == null)
+        {
+            OutputError($"Unknown setting: {settingName}");
+            Output("Use 'pc config list' to see all available settings.");
+            return;
+        }
+
+        var value = field.GetValue(config);
+        Output($"{field.Name} = {value}");
+    }
+
+    private void SetSetting(string settingName, string valueStr)
+    {
+        var config = ProxiCraft.Config;
+        if (config == null)
+        {
+            OutputError("Configuration not loaded!");
+            return;
+        }
+
+        var field = typeof(ModConfig).GetField(settingName,
+            BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+
+        if (field == null)
+        {
+            OutputError($"Unknown setting: {settingName}");
+            Output("Use 'pc config list' to see all available settings.");
+            return;
+        }
+
+        try
+        {
+            object newValue;
+            if (field.FieldType == typeof(bool))
+            {
+                newValue = bool.Parse(valueStr);
+            }
+            else if (field.FieldType == typeof(float))
+            {
+                newValue = float.Parse(valueStr, System.Globalization.CultureInfo.InvariantCulture);
+            }
+            else if (field.FieldType == typeof(int))
+            {
+                newValue = int.Parse(valueStr);
+            }
+            else if (field.FieldType == typeof(string))
+            {
+                newValue = valueStr;
+            }
+            else
+            {
+                OutputError($"Unsupported setting type: {field.FieldType.Name}");
+                return;
+            }
+
+            var oldValue = field.GetValue(config);
+            field.SetValue(config, newValue);
+
+            Output($"{field.Name}: {oldValue} -> {newValue}");
+            Output("Note: Use 'pc config save' to persist this change.");
+
+            // Invalidate caches for certain settings
+            if (settingName.ToLowerInvariant() == "range")
+            {
+                ContainerManager.ClearCache();
+                Output("Container cache cleared due to range change.");
+            }
+        }
+        catch (Exception ex)
+        {
+            OutputError($"Failed to set {settingName}: {ex.Message}");
+            Output($"Expected type: {field.FieldType.Name}");
+        }
+    }
+
+    private void SaveConfig()
+    {
+        try
+        {
+            string configPath = ProxiCraft.GetConfigPath();
+
+            string json = JsonConvert.SerializeObject(ProxiCraft.Config, Formatting.Indented);
+            File.WriteAllText(configPath, json);
+
+            Output($"Configuration saved to: {configPath}");
+        }
+        catch (Exception ex)
+        {
+            OutputError($"Failed to save config: {ex.Message}");
+        }
+    }
+
+    private void ResetConfigToDefaults(bool confirmed)
+    {
+        if (!confirmed)
+        {
+            Output("This will reset all settings to defaults.");
+            Output("This change is NOT saved until you run 'pc config save'.");
+            Output("Use 'pc config reset confirm' to confirm.");
+            return;
+        }
+
+        // Create a new default config
+        var defaultConfig = new ModConfig();
+
+        // Copy all field values from default to current config
+        foreach (var field in typeof(ModConfig).GetFields(BindingFlags.Public | BindingFlags.Instance))
+        {
+            var defaultValue = field.GetValue(defaultConfig);
+            field.SetValue(ProxiCraft.Config, defaultValue);
+        }
+
+        Output("All settings reset to defaults.");
+        Output("Use 'pc config save' to persist these changes.");
+        Output("");
+        ListAllSettings();
+    }
+
+    #endregion
 }

@@ -13,12 +13,20 @@ A 7 Days to Die mod that allows crafting, reloading, refueling, and repairs usin
 - ✅ **Lockpicking** - Use lockpicks from containers to pick locks
 - ✅ **Item Repair** - Use repair kits from containers to repair weapons/tools
 - ✅ **Painting** - Use paint from containers when using paint brush
+- ✅ **HUD Ammo Counter** - Shows total ammo from containers in HUD stat bar
+- ✅ **Recipe Tracker Updates** - Real-time ingredient count updates from containers
+- ✅ **Trader Selling** - Sell items from nearby containers to traders
+- ✅ **Locked Slot Respect** - Items in locked container slots are excluded from all operations
 
 ### Extended Features (Transpiler-based)
 - ✅ **Weapon Reload** - Reload weapons using ammo from containers
 - ✅ **Vehicle Refuel** - Refuel vehicles using gas cans from containers
 - ✅ **Generator Refuel** - Refuel generators from containers
 - ✅ **Trader Purchases** - Pay with dukes stored in containers
+
+### Runtime Configuration
+- ✅ **Live Config Reload** - Changes to config.json apply without restart
+- ✅ **Console Config Commands** - View and modify settings in-game
 
 ### Storage Sources
 - ✅ **Standard Containers** - Chests, boxes, storage crates
@@ -42,8 +50,8 @@ ProxiCraft is designed to survive game updates through multiple layers of protec
 
 | Tier | Features | Risk Level |
 |------|----------|------------|
-| **Stable** | Crafting, Quests, Block Repair, Lockpicking, Item Repair, Painting | Low - Uses simple postfix patches |
-| **Less Stable** | Reload, Vehicle Refuel, Generator Refuel, Trader | Medium - Uses transpiler patches that modify IL code |
+| **Stable** | Crafting, Quests, Block Repair, Lockpicking, Item Repair, Painting, HUD Ammo, Recipe Tracker, Trader Selling, Locked Slots | Low - Uses simple postfix patches |
+| **Less Stable** | Reload, Vehicle Refuel, Generator Refuel, Trader Purchases | Medium - Uses transpiler patches that modify IL code |
 | **Storage Sources** | Vehicles, Drones, Dew Collectors, Workstations | Low - Only reads game data, doesn't patch |
 
 ### 2. Startup Health Check
@@ -80,9 +88,27 @@ Open the console with F1 and use:
 | `pc diag` | Show mod compatibility report |
 | `pc test` | Test container scanning (shows nearby items) |
 | `pc perf` | Performance profiler (see below) |
+| `pc reload` | Reload configuration from config.json |
 | `pc conflicts` | Show detected mod conflicts |
 | `pc toggle` | Enable/disable mod temporarily |
 | `pc debug` | Toggle debug logging |
+
+### Configuration Commands
+
+| Command | Description |
+|---------|-------------|
+| `pc config list` | List all settings with current values |
+| `pc config get <setting>` | Get a specific setting value |
+| `pc config set <setting> <value>` | Set a setting value (temporary) |
+| `pc config save` | Save current settings to config.json |
+| `pc set <setting> <value>` | Shortcut for config set |
+| `pc get <setting>` | Shortcut for config get |
+
+**Example:**
+```
+pc set range 30       # Change range to 30 blocks
+pc config save        # Save changes to config.json
+```
 
 ### Troubleshooting Workflow
 
@@ -135,7 +161,13 @@ Edit `config.json` in the mod folder. The file is organized into sections:
   "enableForReload": true,
   "enableForRefuel": true,
   "enableForTrader": true,
-  "enableForGeneratorRefuel": true
+  "enableForGeneratorRefuel": true,
+
+  // New Features
+  "enableHudAmmoCounter": true,
+  "enableRecipeTrackerUpdates": true,
+  "enableTraderSelling": true,
+  "respectLockedSlots": true
 }
 ```
 
@@ -147,6 +179,10 @@ Edit `config.json` in the mod folder. The file is organized into sections:
 | `isDebug` | false | Enable verbose logging (performance impact) |
 | `verboseHealthCheck` | false | Always show full health check output |
 | `range` | 15 | Search radius in blocks (-1 for unlimited) |
+| `enableHudAmmoCounter` | true | Show container ammo in HUD stat bar |
+| `enableRecipeTrackerUpdates` | true | Live recipe tracker ingredient updates |
+| `enableTraderSelling` | true | Allow selling from containers to traders |
+| `respectLockedSlots` | true | Skip items in user-locked container slots |
 
 ### Range Guide
 

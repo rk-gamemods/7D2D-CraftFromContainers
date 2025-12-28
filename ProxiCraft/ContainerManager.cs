@@ -166,18 +166,19 @@ public static class ContainerManager
     /// <summary>
     /// Gets items from all accessible storage containers.
     /// Used by crafting UI to determine available materials.
+    /// Respects locked slots when config.respectLockedSlots is true.
     /// </summary>
     public static List<ItemStack> GetStorageItems(ModConfig config)
     {
         var items = new List<ItemStack>();
-        
+
         if (!config.modEnabled)
             return items;
 
         try
         {
             RefreshStorages(config);
-            
+
             foreach (var kvp in _currentStorageDict)
             {
                 try
@@ -185,18 +186,53 @@ public static class ContainerManager
                     if (kvp.Value is ITileEntityLootable lootable)
                     {
                         var lootItems = lootable.items;
-                        if (lootItems != null)
-                            items.AddRange(lootItems.Where(i => i != null && !i.IsEmpty()));
+                        if (lootItems == null) continue;
+
+                        // Get locked slots for this container
+                        PackedBoolArray lockedSlots = null;
+                        if (config.respectLockedSlots)
+                        {
+                            if (lootable is TEFeatureStorage storage)
+                                lockedSlots = storage.SlotLocks;
+                            else if (lootable is TileEntitySecureLootContainer secureLoot)
+                                lockedSlots = secureLoot.SlotLocks;
+                        }
+
+                        for (int i = 0; i < lootItems.Length; i++)
+                        {
+                            // Skip locked slots when respectLockedSlots is enabled
+                            if (config.respectLockedSlots && lockedSlots != null &&
+                                i < lockedSlots.Length && lockedSlots[i])
+                                continue;
+
+                            var item = lootItems[i];
+                            if (item != null && !item.IsEmpty())
+                                items.Add(item);
+                        }
                     }
                     else if (kvp.Value is Bag bag)
                     {
                         var slots = bag.GetSlots();
-                        if (slots != null)
-                            items.AddRange(slots.Where(i => i != null && !i.IsEmpty()));
+                        if (slots == null) continue;
+
+                        var lockedSlots = bag.LockedSlots;
+
+                        for (int i = 0; i < slots.Length; i++)
+                        {
+                            // Skip locked slots when respectLockedSlots is enabled
+                            if (config.respectLockedSlots && lockedSlots != null &&
+                                i < lockedSlots.Length && lockedSlots[i])
+                                continue;
+
+                            var item = slots[i];
+                            if (item != null && !item.IsEmpty())
+                                items.Add(item);
+                        }
                     }
                     else if (kvp.Value is StorageSourceInfo sourceInfo)
                     {
                         // Dew collectors and workstation outputs via wrapper
+                        // These don't typically have locked slots
                         if (sourceInfo.Items != null)
                             items.AddRange(sourceInfo.Items.Where(i => i != null && !i.IsEmpty()));
                     }
@@ -373,14 +409,30 @@ public static class ContainerManager
             if (CurrentOpenContainer?.items != null)
             {
                 var items = CurrentOpenContainer.items;
+
+                // Get locked slots for open container (depends on concrete type)
+                PackedBoolArray openContainerLockedSlots = null;
+                if (config.respectLockedSlots)
+                {
+                    if (CurrentOpenContainer is TEFeatureStorage storage)
+                        openContainerLockedSlots = storage.SlotLocks;
+                    else if (CurrentOpenContainer is TileEntitySecureLootContainer secureLoot)
+                        openContainerLockedSlots = secureLoot.SlotLocks;
+                }
+
                 for (int i = 0; i < items.Length; i++)
                 {
+                    // Skip locked slots when respectLockedSlots is enabled
+                    if (config.respectLockedSlots && openContainerLockedSlots != null &&
+                        i < openContainerLockedSlots.Length && openContainerLockedSlots[i])
+                        continue;
+
                     var stack = items[i];
                     if (stack?.itemValue != null && !stack.IsEmpty())
                         AddToCountCache(stack.itemValue.type, stack.count);
                 }
             }
-            
+
             // SECOND: Count from open vehicle via cached reference (live data)
             // When vehicle storage is open, its bag has the live data
             if (CurrentOpenVehicle != null)
@@ -391,8 +443,15 @@ public static class ContainerManager
                     var slots = vehicleBag.GetSlots();
                     if (slots != null)
                     {
+                        var vehicleLockedSlots = vehicleBag.LockedSlots;
+
                         for (int i = 0; i < slots.Length; i++)
                         {
+                            // Skip locked slots when respectLockedSlots is enabled
+                            if (config.respectLockedSlots && vehicleLockedSlots != null &&
+                                i < vehicleLockedSlots.Length && vehicleLockedSlots[i])
+                                continue;
+
                             var stack = slots[i];
                             if (stack?.itemValue != null && !stack.IsEmpty())
                                 AddToCountCache(stack.itemValue.type, stack.count);
@@ -536,10 +595,12 @@ public static class ContainerManager
 
     /// <summary>
     /// Counts all items in a tile entity and adds to cache.
+    /// Respects locked slots when config.respectLockedSlots is true.
     /// </summary>
     private static void CountTileEntityItems(TileEntity tileEntity, ModConfig config)
     {
         ItemStack[] items = null;
+        PackedBoolArray lockedSlots = null;
 
         if (tileEntity is TileEntityComposite composite)
         {
@@ -554,6 +615,7 @@ public static class ContainerManager
                     return;
 
                 items = storage.items;
+                lockedSlots = storage.SlotLocks;
             }
         }
         else if (tileEntity is TileEntitySecureLootContainer secureLoot)
@@ -562,12 +624,19 @@ public static class ContainerManager
                 return;
 
             items = secureLoot.items;
+            lockedSlots = secureLoot.SlotLocks;
         }
 
         if (items != null)
         {
-            foreach (var stack in items)
+            for (int i = 0; i < items.Length; i++)
             {
+                // Skip locked slots when respectLockedSlots is enabled
+                if (config.respectLockedSlots && lockedSlots != null &&
+                    i < lockedSlots.Length && lockedSlots[i])
+                    continue;
+
+                var stack = items[i];
                 if (stack?.itemValue != null && !stack.IsEmpty())
                     AddToCountCache(stack.itemValue.type, stack.count);
             }
@@ -577,6 +646,7 @@ public static class ContainerManager
     /// <summary>
     /// Counts all items in nearby vehicles and adds to cache.
     /// Skips the currently open vehicle to avoid stale data issues.
+    /// Respects locked slots when config.respectLockedSlots is true.
     /// </summary>
     private static void CountAllVehicleItems(World world, Vector3 playerPos, ModConfig config)
     {
@@ -600,7 +670,7 @@ public static class ContainerManager
                     // When vehicle storage is open, we count from the live UI data instead
                     if (CurrentOpenVehicle != null && vehicle.entityId == CurrentOpenVehicle.entityId)
                         continue;
-                    
+
                     if (rangeSquared > 0f)
                     {
                         float dx = playerPos.x - vehicle.position.x;
@@ -620,8 +690,15 @@ public static class ContainerManager
                     var slots = bag.GetSlots();
                     if (slots == null) continue;
 
+                    var lockedSlots = bag.LockedSlots;
+
                     for (int j = 0; j < slots.Length; j++)
                     {
+                        // Skip locked slots when respectLockedSlots is enabled
+                        if (config.respectLockedSlots && lockedSlots != null &&
+                            j < lockedSlots.Length && lockedSlots[j])
+                            continue;
+
                         var stack = slots[j];
                         if (stack?.itemValue != null && !stack.IsEmpty())
                             AddToCountCache(stack.itemValue.type, stack.count);
@@ -643,6 +720,7 @@ public static class ContainerManager
     /// Counts all items in player's drones and adds to cache.
     /// NOTE: drone.lootContainer.items and drone.bag.GetSlots() share the SAME array!
     /// We only count from lootContainer to avoid double-counting.
+    /// Respects locked slots when config.respectLockedSlots is true.
     /// </summary>
     private static void CountAllDroneItems(World world, Vector3 playerPos, ModConfig config)
     {
@@ -666,7 +744,7 @@ public static class ContainerManager
                     // (drone storage opens via XUiC_LootContainer which sets CurrentOpenContainer)
                     if (CurrentOpenDrone != null && drone.entityId == CurrentOpenDrone.entityId)
                         continue;
-                    
+
                     if (rangeSquared > 0f)
                     {
                         float dx = playerPos.x - drone.position.x;
@@ -675,7 +753,7 @@ public static class ContainerManager
                         if (dx * dx + dy * dy + dz * dz >= rangeSquared)
                             continue;
                     }
-                    
+
                     // Only include drones owned by the local player
                     if (!drone.LocalPlayerIsOwner())
                         continue;
@@ -686,8 +764,16 @@ public static class ContainerManager
                     var items = lootContainer?.items;
                     if (items != null)
                     {
+                        // Get locked slots from drone's bag (shares same underlying array)
+                        var lockedSlots = drone.bag?.LockedSlots;
+
                         for (int j = 0; j < items.Length; j++)
                         {
+                            // Skip locked slots when respectLockedSlots is enabled
+                            if (config.respectLockedSlots && lockedSlots != null &&
+                                j < lockedSlots.Length && lockedSlots[j])
+                                continue;
+
                             var stack = items[j];
                             if (stack?.itemValue != null && !stack.IsEmpty())
                                 AddToCountCache(stack.itemValue.type, stack.count);
@@ -850,6 +936,7 @@ public static class ContainerManager
 
     /// <summary>
     /// Removes items from storage containers.
+    /// Respects locked slots when config.respectLockedSlots is true.
     /// </summary>
     /// <param name="config">Mod configuration</param>
     /// <param name="item">The item type to remove</param>
@@ -879,13 +966,28 @@ public static class ContainerManager
                         var items = lootable.items;
                         if (items == null) continue;
 
+                        // Get locked slots for this container
+                        PackedBoolArray lockedSlots = null;
+                        if (config.respectLockedSlots)
+                        {
+                            if (lootable is TEFeatureStorage storage)
+                                lockedSlots = storage.SlotLocks;
+                            else if (lootable is TileEntitySecureLootContainer secureLoot)
+                                lockedSlots = secureLoot.SlotLocks;
+                        }
+
                         for (int i = 0; i < items.Length && remaining > 0; i++)
                         {
+                            // Skip locked slots when respectLockedSlots is enabled
+                            if (config.respectLockedSlots && lockedSlots != null &&
+                                i < lockedSlots.Length && lockedSlots[i])
+                                continue;
+
                             if (items[i]?.itemValue?.type != item.type)
                                 continue;
 
                             int toRemove = Math.Min(remaining, items[i].count);
-                            
+
                             ProxiCraft.LogDebug($"Removing {toRemove}/{remaining} {item.ItemClass?.GetItemName() ?? "unknown"} from container");
 
                             if (items[i].count <= toRemove)
@@ -912,8 +1014,15 @@ public static class ContainerManager
                         var slots = bag.GetSlots();
                         if (slots == null) continue;
 
+                        var lockedSlots = bag.LockedSlots;
+
                         for (int i = 0; i < slots.Length && remaining > 0; i++)
                         {
+                            // Skip locked slots when respectLockedSlots is enabled
+                            if (config.respectLockedSlots && lockedSlots != null &&
+                                i < lockedSlots.Length && lockedSlots[i])
+                                continue;
+
                             if (slots[i]?.itemValue?.type != item.type)
                                 continue;
 

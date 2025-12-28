@@ -27,5 +27,11 @@
   "enableForReload": true,
   "enableForRefuel": true,
   "enableForTrader": true,
-  "enableForGeneratorRefuel": true
+  "enableForGeneratorRefuel": true,
+
+  "_newFeaturesNote": "NEW - Additional stable features using simple postfix patches.",
+  "enableHudAmmoCounter": true,
+  "enableRecipeTrackerUpdates": true,
+  "enableTraderSelling": true,
+  "respectLockedSlots": true
 }

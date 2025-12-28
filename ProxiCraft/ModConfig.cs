@@ -79,6 +79,21 @@ public class ModConfig
     /// <summary>Allow repairing items (weapons/tools) using repair kits from nearby containers</summary>
     public bool enableForItemRepair = true;
 
+    /// <summary>Show total ammo from nearby containers in HUD stat bar</summary>
+    public bool enableHudAmmoCounter = true;
+
+    /// <summary>Enable real-time recipe tracker updates when container items change</summary>
+    public bool enableRecipeTrackerUpdates = true;
+
+    /// <summary>Allow selling items from nearby containers to traders</summary>
+    public bool enableTraderSelling = true;
+
+    /// <summary>
+    /// Respect user-locked slots in containers (locked slots are excluded from all operations).
+    /// When true (default), items in locked slots won't be counted, used, or removed.
+    /// </summary>
+    public bool respectLockedSlots = true;
+
     // ===========================================
     // DEPRECATED - Kept for backward compatibility
     // ===========================================

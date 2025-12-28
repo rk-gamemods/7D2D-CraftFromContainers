@@ -365,6 +365,99 @@ public static class StartupHealthCheck
         {
             AddResult("ItemRepair", "Item repair from containers", HealthStatus.Disabled, "Disabled in config");
         }
+
+        // HUD Ammo Counter
+        if (config.enableHudAmmoCounter)
+        {
+            var updateAmmoMethod = AccessTools.Method(typeof(XUiC_HUDStatBar), "updateActiveItemAmmo");
+            if (updateAmmoMethod != null)
+            {
+                AddResult("HudAmmoCounter", "HUD ammo counter from containers", HealthStatus.OK,
+                    "XUiC_HUDStatBar.updateActiveItemAmmo validated");
+            }
+            else
+            {
+                AddResult("HudAmmoCounter", "HUD ammo counter from containers", HealthStatus.Failed,
+                    "updateActiveItemAmmo method not found");
+            }
+        }
+        else
+        {
+            AddResult("HudAmmoCounter", "HUD ammo counter from containers", HealthStatus.Disabled, "Disabled in config");
+        }
+
+        // Recipe Tracker Updates
+        if (config.enableRecipeTrackerUpdates)
+        {
+            var recipeTrackerType = AccessTools.TypeByName("XUiC_RecipeTrackerWindow");
+            if (recipeTrackerType != null)
+            {
+                AddResult("RecipeTracker", "Recipe tracker live updates", HealthStatus.OK,
+                    "XUiC_RecipeTrackerWindow found - updates will trigger on container changes");
+            }
+            else
+            {
+                AddResult("RecipeTracker", "Recipe tracker live updates", HealthStatus.Failed,
+                    "XUiC_RecipeTrackerWindow not found");
+            }
+        }
+        else
+        {
+            AddResult("RecipeTracker", "Recipe tracker live updates", HealthStatus.Disabled, "Disabled in config");
+        }
+
+        // Trader Selling
+        if (config.enableTraderSelling)
+        {
+            var sellActivated = AccessTools.Method(typeof(ItemActionEntrySell), "OnActivated");
+            var sellRefresh = AccessTools.Method(typeof(ItemActionEntrySell), "RefreshEnabled");
+            if (sellActivated != null && sellRefresh != null)
+            {
+                AddResult("TraderSelling", "Selling items from containers", HealthStatus.OK,
+                    "ItemActionEntrySell methods validated");
+            }
+            else
+            {
+                AddResult("TraderSelling", "Selling items from containers", HealthStatus.Failed,
+                    "ItemActionEntrySell methods not found",
+                    $"OnActivated: {(sellActivated != null ? "OK" : "MISSING")}, RefreshEnabled: {(sellRefresh != null ? "OK" : "MISSING")}");
+            }
+        }
+        else
+        {
+            AddResult("TraderSelling", "Selling items from containers", HealthStatus.Disabled, "Disabled in config");
+        }
+
+        // Locked Slot Respect
+        if (config.respectLockedSlots)
+        {
+            // Check if PackedBoolArray exists (used for SlotLocks)
+            var packedBoolType = AccessTools.TypeByName("PackedBoolArray");
+            // Check if TEFeatureStorage has SlotLocks
+            var storageType = AccessTools.TypeByName("TEFeatureStorage");
+            var slotLocksField = storageType != null ? AccessTools.Field(storageType, "SlotLocks") : null;
+
+            if (packedBoolType != null && slotLocksField != null)
+            {
+                AddResult("LockedSlots", "Respect locked slots", HealthStatus.OK,
+                    "SlotLocks field validated - locked slots will be skipped");
+            }
+            else if (packedBoolType != null)
+            {
+                AddResult("LockedSlots", "Respect locked slots", HealthStatus.Degraded,
+                    "PackedBoolArray found but SlotLocks field not found - may not work for all containers",
+                    $"TEFeatureStorage: {(storageType != null ? "found" : "missing")}, SlotLocks: {(slotLocksField != null ? "found" : "missing")}");
+            }
+            else
+            {
+                AddResult("LockedSlots", "Respect locked slots", HealthStatus.Failed,
+                    "PackedBoolArray type not found - feature will not work");
+            }
+        }
+        else
+        {
+            AddResult("LockedSlots", "Respect locked slots", HealthStatus.Disabled, "Disabled in config");
+        }
     }
 
     private static void CheckStorageSources(ModConfig config)
