@@ -1517,7 +1517,20 @@ public class ProxiCraft : IModApi
                 if (lootable != null)
                 {
                     ContainerManager.CurrentOpenContainer = lootable;
-                    ContainerManager.CurrentOpenContainerPos = (lootable as TileEntity)?.ToWorldPos() ?? Vector3i.zero;
+                    
+                    // Get world position - handle both TileEntity and ITileEntity (like TEFeatureStorage)
+                    // ITileEntity has ToWorldPos() method, but TEFeatureStorage is NOT a TileEntity class
+                    Vector3i pos = Vector3i.zero;
+                    if (lootable is TileEntity te)
+                    {
+                        pos = te.ToWorldPos();
+                    }
+                    else if (lootable is ITileEntity ite)
+                    {
+                        // TEFeatureStorage implements ITileEntity which has ToWorldPos()
+                        pos = ite.ToWorldPos();
+                    }
+                    ContainerManager.CurrentOpenContainerPos = pos;
                     ContainerManager.InvalidateCache(); // Force recount with new open container
                     FileLog($"[CACHE] OnOpen: Set open container at {ContainerManager.CurrentOpenContainerPos}");
                 }
@@ -1602,12 +1615,16 @@ public class ProxiCraft : IModApi
             if (!Config?.modEnabled == true || !Config?.enableForQuests == true)
                 return;
             
-            // Only trigger when a container is open
-            if (ContainerManager.CurrentOpenContainer == null)
+            // Only trigger when a container or vehicle storage is open
+            if (ContainerManager.CurrentOpenContainer == null && ContainerManager.CurrentOpenVehicle == null)
                 return;
             
             // Skip if this is a container slot - already handled by LootContainer_SlotChanged_Patch
             if (__instance.StackLocation == XUiC_ItemStack.StackLocationTypes.LootContainer)
+                return;
+            
+            // Skip if this is a vehicle slot - already handled by VehicleContainer_SlotChanged_Patch
+            if (__instance.StackLocation == XUiC_ItemStack.StackLocationTypes.Vehicle)
                 return;
             
             try
@@ -1630,6 +1647,101 @@ public class ProxiCraft : IModApi
             catch (Exception ex)
             {
                 FileLog($"ItemStack_SlotChanged_Patch: Exception: {ex.Message}");
+            }
+        }
+    }
+
+    // ====================================================================================
+    // VEHICLE STORAGE PATCHES
+    // ====================================================================================
+    // Vehicle storage uses XUiC_VehicleContainer and XUiC_VehicleStorageWindowGroup,
+    // NOT XUiC_LootContainer. We need separate patches to:
+    // 1. Track when vehicle storage is opened/closed
+    // 2. Invalidate cache and fire events when items are moved
+    // ====================================================================================
+    
+    /// <summary>
+    /// Track when vehicle storage window is opened.
+    /// Sets CurrentOpenVehicle so we can skip counting it separately.
+    /// </summary>
+    [HarmonyPatch(typeof(XUiC_VehicleStorageWindowGroup), "OnOpen")]
+    [HarmonyPriority(Priority.Low)]
+    private static class VehicleStorageWindowGroup_OnOpen_Patch
+    {
+        public static void Postfix(XUiC_VehicleStorageWindowGroup __instance)
+        {
+            try
+            {
+                var vehicleField = typeof(XUiC_VehicleStorageWindowGroup).GetField("currentVehicleEntity",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                
+                var vehicle = vehicleField?.GetValue(__instance) as EntityVehicle;
+                
+                if (vehicle != null)
+                {
+                    ContainerManager.CurrentOpenVehicle = vehicle;
+                    ContainerManager.InvalidateCache();
+                    FileLog($"[CACHE] VehicleStorageWindowGroup.OnOpen: Set open vehicle {vehicle.EntityName}");
+                }
+            }
+            catch (Exception ex)
+            {
+                FileLog($"VehicleStorageWindowGroup_OnOpen_Patch: Exception: {ex.Message}");
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Track when vehicle storage window is closed.
+    /// </summary>
+    [HarmonyPatch(typeof(XUiC_VehicleStorageWindowGroup), "OnClose")]
+    [HarmonyPriority(Priority.Low)]
+    private static class VehicleStorageWindowGroup_OnClose_Patch
+    {
+        public static void Postfix()
+        {
+            ContainerManager.CurrentOpenVehicle = null;
+            ContainerManager.InvalidateCache();
+            FileLog("[CACHE] VehicleStorageWindowGroup.OnClose: Cleared");
+        }
+    }
+    
+    /// <summary>
+    /// Track when items are moved in vehicle storage.
+    /// Fire DragAndDropItemChanged to update challenge counts.
+    /// </summary>
+    [HarmonyPatch(typeof(XUiC_VehicleContainer), "HandleLootSlotChangedEvent")]
+    [HarmonyPriority(Priority.Low)]
+    private static class VehicleContainer_SlotChanged_Patch
+    {
+        public static void Postfix()
+        {
+            // Always invalidate cache when vehicle contents change
+            ContainerManager.InvalidateCache();
+            
+            if (!Config?.modEnabled == true || !Config?.enableForQuests == true)
+                return;
+            
+            try
+            {
+                var player = GameManager.Instance?.World?.GetPrimaryPlayer();
+                if (player == null)
+                    return;
+                
+                // Fire DragAndDropItemChanged - challenges listen to this
+                var eventField = typeof(EntityPlayerLocal).GetField("DragAndDropItemChanged",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                
+                if (eventField != null)
+                {
+                    var eventDelegate = eventField.GetValue(player) as Delegate;
+                    eventDelegate?.DynamicInvoke();
+                    FileLog("[RECOUNT] Fired DragAndDropItemChanged from vehicle slot change");
+                }
+            }
+            catch (Exception ex)
+            {
+                FileLog($"VehicleContainer_SlotChanged_Patch: Exception: {ex.Message}");
             }
         }
     }

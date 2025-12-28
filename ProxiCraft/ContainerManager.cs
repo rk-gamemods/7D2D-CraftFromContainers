@@ -105,6 +105,15 @@ public static class ContainerManager
     public static ITileEntityLootable CurrentOpenContainer { get; set; }
     public static Vector3i CurrentOpenContainerPos { get; set; }
     
+    // ====================================================================================
+    // LIVE OPEN VEHICLE REFERENCE  
+    // ====================================================================================
+    // Set by VehicleStorageWindowGroup_OnOpen_Patch, cleared by OnClose.
+    // When vehicle storage is open, we need to skip counting it separately to avoid
+    // double-counting or stale data issues.
+    // ====================================================================================
+    public static EntityVehicle CurrentOpenVehicle { get; set; }
+    
     /// <summary>
     /// Forces the next container scan to refresh the cache.
     /// Call this when containers may have changed contents.
@@ -129,6 +138,9 @@ public static class ContainerManager
         _forceCacheRefresh = true;
         _itemCountCacheValid = false;
         _lastItemCountFrame = -1;
+        CurrentOpenContainer = null;
+        CurrentOpenContainerPos = Vector3i.zero;
+        CurrentOpenVehicle = null;
     }
 
     /// <summary>
@@ -332,6 +344,25 @@ public static class ContainerManager
                 }
             }
             
+            // SECOND: Count from open vehicle via cached reference (live data)
+            // When vehicle storage is open, its bag has the live data
+            if (CurrentOpenVehicle != null)
+            {
+                var vehicleBag = ((EntityAlive)CurrentOpenVehicle).bag;
+                if (vehicleBag != null)
+                {
+                    var slots = vehicleBag.GetSlots();
+                    if (slots != null)
+                    {
+                        foreach (var stack in slots)
+                        {
+                            if (stack?.itemValue != null && !stack.IsEmpty())
+                                AddToCountCache(stack.itemValue.type, stack.count);
+                        }
+                    }
+                }
+            }
+            
             // Scan closed containers from TileEntities
             for (int clusterIdx = 0; clusterIdx < world.ChunkClusters.Count; clusterIdx++)
             {
@@ -468,6 +499,7 @@ public static class ContainerManager
 
     /// <summary>
     /// Counts all items in nearby vehicles and adds to cache.
+    /// Skips the currently open vehicle to avoid stale data issues.
     /// </summary>
     private static void CountAllVehicleItems(World world, Vector3 playerPos, ModConfig config)
     {
@@ -481,6 +513,11 @@ public static class ContainerManager
 
             try
             {
+                // Skip the currently open vehicle - its data may be changing
+                // When vehicle storage is open, we count from the live UI data instead
+                if (CurrentOpenVehicle != null && vehicle.entityId == CurrentOpenVehicle.entityId)
+                    continue;
+                
                 if (config.range > 0f && Vector3.Distance(playerPos, vehicle.position) >= config.range)
                     continue;
                 if (!vehicle.LocalPlayerIsOwner())
