@@ -1564,4 +1564,289 @@ public class ProxiCraft : IModApi
     }
 
     #endregion
+
+    #region Harmony Patches - Painting Support
+
+    // ====================================================================================
+    // PAINTING SUPPORT
+    // ====================================================================================
+    //
+    // Allows painting blocks using paint from nearby containers.
+    // Uses PREFIX patches to replace the vanilla checkAmmo and decreaseAmmo methods.
+    //
+    // How it works:
+    // 1. checkAmmo - Returns true if player has enough paint (inventory + containers)
+    // 2. decreaseAmmo - Removes paint from player inventory first, then from containers
+    //
+    // Reference: BeyondStorage2's ItemActionTextureBlock_Patches.cs
+    // ====================================================================================
+
+    /// <summary>
+    /// Patch ItemActionTextureBlock.checkAmmo to check containers for paint.
+    /// Uses PREFIX to replace vanilla logic with container-aware version.
+    /// </summary>
+    [HarmonyPatch(typeof(ItemActionTextureBlock), nameof(ItemActionTextureBlock.checkAmmo))]
+    [HarmonyPriority(Priority.Low)]
+    private static class ItemActionTextureBlock_checkAmmo_Patch
+    {
+        public static bool Prefix(ItemActionTextureBlock __instance, ItemActionData _actionData, ref bool __result)
+        {
+            // Skip if feature disabled
+            if (!Config?.modEnabled == true || !Config?.enableForPainting == true)
+                return true; // Run original method
+
+            try
+            {
+                // Handle infinite ammo and creative modes (same as original)
+                if (__instance.InfiniteAmmo ||
+                    GameStats.GetInt(EnumGameStats.GameModeId) == 2 || // Creative
+                    GameStats.GetInt(EnumGameStats.GameModeId) == 8)   // Test
+                {
+                    __result = true;
+                    return false; // Skip original method
+                }
+
+                // Get current paint item
+                var paintItem = __instance.currentMagazineItem;
+                if (paintItem == null)
+                    return true; // Let original handle it
+
+                // Get entity-held ammo count
+                EntityAlive holdingEntity = _actionData.invData.holdingEntity;
+                int bagCount = holdingEntity.bag?.GetItemCount(paintItem) ?? 0;
+                int inventoryCount = holdingEntity.inventory?.GetItemCount(paintItem) ?? 0;
+                int entityAvailable = bagCount + inventoryCount;
+
+                // If player has enough, no need to check containers
+                if (entityAvailable > 0)
+                {
+                    __result = true;
+                    return false;
+                }
+
+                // Check containers for paint
+                int containerCount = ContainerManager.GetItemCount(Config, paintItem);
+                __result = containerCount > 0;
+
+                LogDebug($"checkAmmo: Paint={paintItem.ItemClass?.GetItemName()}, entity={entityAvailable}, containers={containerCount}, result={__result}");
+
+                return false; // Skip original method
+            }
+            catch (Exception ex)
+            {
+                LogWarning($"Error in checkAmmo patch: {ex.Message}");
+                return true; // Let original handle it on error
+            }
+        }
+    }
+
+    /// <summary>
+    /// Patch ItemActionTextureBlock.decreaseAmmo to use paint from containers.
+    /// Uses PREFIX to replace vanilla logic with container-aware version.
+    /// </summary>
+    [HarmonyPatch(typeof(ItemActionTextureBlock), nameof(ItemActionTextureBlock.decreaseAmmo))]
+    [HarmonyPriority(Priority.Low)]
+    private static class ItemActionTextureBlock_decreaseAmmo_Patch
+    {
+        public static bool Prefix(ItemActionTextureBlock __instance, ItemActionData _actionData, ref bool __result)
+        {
+            // Skip if feature disabled
+            if (!Config?.modEnabled == true || !Config?.enableForPainting == true)
+                return true; // Run original method
+
+            try
+            {
+                // Handle infinite ammo and creative modes (same as original)
+                if (__instance.InfiniteAmmo ||
+                    GameStats.GetInt(EnumGameStats.GameModeId) == 2 || // Creative
+                    GameStats.GetInt(EnumGameStats.GameModeId) == 8)   // Test
+                {
+                    __result = true;
+                    return false; // Skip original method
+                }
+
+                // Get the action data and paint cost
+                var textureBlockData = _actionData as ItemActionTextureBlock.ItemActionTextureBlockData;
+                if (textureBlockData == null)
+                    return true; // Let original handle it
+
+                int paintCost = BlockTextureData.list[textureBlockData.idx].PaintCost;
+
+                EntityAlive holdingEntity = _actionData.invData.holdingEntity;
+                var paintItem = __instance.currentMagazineItem;
+
+                // Calculate entity-held ammo
+                int bagCount = holdingEntity.bag?.GetItemCount(paintItem) ?? 0;
+                int inventoryCount = holdingEntity.inventory?.GetItemCount(paintItem) ?? 0;
+                int entityAvailable = bagCount + inventoryCount;
+
+                // Get total available including storage
+                int containerCount = ContainerManager.GetItemCount(Config, paintItem);
+                int totalAvailable = entityAvailable + containerCount;
+
+                // Check if we have enough total ammo
+                if (totalAvailable < paintCost)
+                {
+                    __result = false;
+                    return false; // Skip original method
+                }
+
+                // Remove ammo from entity inventory first (same priority as original)
+                int remainingNeeded = paintCost;
+
+                // Remove from bag first
+                if (remainingNeeded > 0 && holdingEntity.bag != null)
+                {
+                    remainingNeeded -= holdingEntity.bag.DecItem(paintItem, remainingNeeded);
+                }
+
+                // Then from toolbelt/inventory
+                if (remainingNeeded > 0 && holdingEntity.inventory != null)
+                {
+                    remainingNeeded -= holdingEntity.inventory.DecItem(paintItem, remainingNeeded);
+                }
+
+                // Remove any remaining needed from containers
+                if (remainingNeeded > 0)
+                {
+                    int removed = ContainerManager.RemoveItems(Config, paintItem, remainingNeeded);
+                    LogDebug($"decreaseAmmo: Removed {removed} paint from containers (needed {remainingNeeded})");
+                    remainingNeeded -= removed;
+                }
+
+                __result = remainingNeeded <= 0;
+                return false; // Skip original method
+            }
+            catch (Exception ex)
+            {
+                LogWarning($"Error in decreaseAmmo patch: {ex.Message}");
+                return true; // Let original handle it on error
+            }
+        }
+    }
+
+    #endregion
+
+    #region Harmony Patches - Generator/Power Source Refuel Support
+
+    // ====================================================================================
+    // GENERATOR REFUEL SUPPORT
+    // ====================================================================================
+    //
+    // Allows refueling generators/power sources using fuel from nearby containers.
+    // Uses TRANSPILER to replace Bag.DecItem with our wrapper that also checks containers.
+    //
+    // Reference: BeyondStorage2's XUiC_PowerSourceStats_Patches.cs
+    // ====================================================================================
+
+    /// <summary>
+    /// Patch XUiC_PowerSourceStats.BtnRefuel_OnPress to use fuel from containers.
+    /// Uses TRANSPILER to replace Bag.DecItem with our wrapper.
+    /// </summary>
+    [HarmonyPatch(typeof(XUiC_PowerSourceStats), nameof(XUiC_PowerSourceStats.BtnRefuel_OnPress))]
+    [HarmonyPriority(Priority.Low)]
+    private static class XUiC_PowerSourceStats_BtnRefuel_OnPress_Patch
+    {
+        public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            if (!Config?.enableForGeneratorRefuel == true)
+                return instructions;
+
+            var codes = new List<CodeInstruction>(instructions);
+            var decItemMethod = AccessTools.Method(typeof(Bag), nameof(Bag.DecItem));
+
+            bool patched = false;
+
+            for (int i = 0; i < codes.Count; i++)
+            {
+                if ((codes[i].opcode == OpCodes.Call || codes[i].opcode == OpCodes.Callvirt) &&
+                    codes[i].operand is MethodInfo method &&
+                    method == decItemMethod)
+                {
+                    // Replace Bag.DecItem with our wrapper
+                    codes[i].operand = AccessTools.Method(typeof(ProxiCraft), nameof(DecItemForGeneratorRefuel));
+                    codes[i].opcode = OpCodes.Call;
+                    LogDebug("Patched XUiC_PowerSourceStats.BtnRefuel_OnPress");
+                    patched = true;
+                    break;
+                }
+            }
+
+            if (!patched)
+            {
+                LogDebug("XUiC_PowerSourceStats.BtnRefuel_OnPress - Bag.DecItem not found");
+            }
+
+            return codes.AsEnumerable();
+        }
+    }
+
+    /// <summary>
+    /// Removes fuel from bag and containers for generator refueling.
+    /// </summary>
+    public static int DecItemForGeneratorRefuel(Bag bag, ItemValue item, int count, bool ignoreModded, IList<ItemStack> removedItems)
+    {
+        int removed = bag.DecItem(item, count, ignoreModded, removedItems);
+
+        if (!Config?.modEnabled == true || !Config?.enableForGeneratorRefuel == true)
+            return removed;
+
+        // Safety check - don't access containers if game state isn't ready
+        if (!IsGameReady())
+            return removed;
+
+        if (removed < count)
+        {
+            int remaining = count - removed;
+            int containerRemoved = ContainerManager.RemoveItems(Config, item, remaining);
+            LogDebug($"Removed {containerRemoved} fuel from containers for generator");
+            removed += containerRemoved;
+        }
+
+        return removed;
+    }
+
+    #endregion
+
+    #region Harmony Patches - Lockpicking Support
+
+    // ====================================================================================
+    // LOCKPICKING SUPPORT
+    // ====================================================================================
+    //
+    // Allows lockpicking using lockpicks from nearby containers.
+    //
+    // IMPLEMENTATION NOTE:
+    // Lockpicking is already covered by our existing patches:
+    // - XUiM_PlayerInventory.GetItemCount patch adds container counts
+    // - XUiM_PlayerInventory.RemoveItems patch removes from containers
+    //
+    // The game's lockpicking code (BlockSecureLoot, TEFeatureLockPickable) uses
+    // XUiM_PlayerInventory.GetItemCount to check for lockpicks, which we already patch.
+    //
+    // No additional patches needed - this is just a documentation note.
+    // ====================================================================================
+
+    #endregion
+
+    #region Harmony Patches - Item Repair Support (Weapons/Tools)
+
+    // ====================================================================================
+    // ITEM REPAIR SUPPORT
+    // ====================================================================================
+    //
+    // Allows repairing weapons/tools using repair kits from nearby containers.
+    //
+    // IMPLEMENTATION NOTE:
+    // Item repair is already covered by our existing patches:
+    // - XUiM_PlayerInventory.GetItemCount patch adds container counts (enables Repair button)
+    // - XUiM_PlayerInventory.RemoveItems patch removes from containers (consumes repair kits)
+    //
+    // The game's ItemActionEntryRepair uses XUiM_PlayerInventory for both checking
+    // and consuming repair kits, which we already patch.
+    //
+    // No additional patches needed - this is just a documentation note.
+    // ====================================================================================
+
+    #endregion
 }

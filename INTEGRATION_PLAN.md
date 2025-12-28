@@ -20,7 +20,19 @@ This document outlines the plan to integrate features from BeyondStorage2 into P
 | Challenge tracker integration | ✅ |
 | Vehicle storage | ✅ |
 
-## New Features to Add
+## Newly Integrated Features (from BeyondStorage2)
+
+| Feature | Status | Implementation |
+|---------|--------|----------------|
+| Drone storage | ✅ Implemented | ContainerManager.ProcessDroneEntity() |
+| Dew collector contents | ✅ Implemented | ContainerManager.ProcessDewCollector() |
+| Workstation outputs | ✅ Implemented | ContainerManager.ProcessWorkstationOutput() |
+| Painting from containers | ✅ Implemented | ItemActionTextureBlock PREFIX patches |
+| Lockpicking from containers | ✅ Covered | Via existing XUiM_PlayerInventory patches |
+| Generator refuel | ✅ Implemented | XUiC_PowerSourceStats TRANSPILER patch |
+| Item repair (weapons/tools) | ✅ Covered | Via existing XUiM_PlayerInventory patches |
+
+## Features To Add (Original Plan)
 
 ### Phase 1: Expand Storage Sources (No New Patches Required)
 
@@ -209,16 +221,80 @@ For our features, **none require transpilers**.
 
 ## Testing Checklist
 
-- [ ] Drones: Items in drone storage appear in crafting counts
-- [ ] Dew Collectors: Water from collectors can be used for recipes
-- [ ] Workstation Outputs: Finished forge items can be used immediately
-- [ ] Painting: Paint from storage works with paint brush
-- [ ] Lockpicking: Lockpicks from storage work on locked containers
-- [ ] Generator Refuel: Gas cans from storage refuel generators
-- [ ] Item Repair: Repair kits from storage repair weapons/tools
-- [ ] Existing features still work (crafting, reload, vehicle refuel, etc.)
-- [ ] Challenge tracker still works with new storage sources
-- [ ] Performance acceptable with expanded container scanning
+### New Storage Sources
+
+#### Drone Storage (`pullFromDrones`)
+- [ ] Place items in player's drone storage
+- [ ] Items appear in crafting recipe counts
+- [ ] Items can be used for crafting (consumed from drone)
+- [ ] Only player's own drones are accessed
+- [ ] Drones in shutdown/locked state are skipped
+
+#### Dew Collector Contents (`pullFromDewCollectors`)
+- [ ] Place/wait for water in dew collector
+- [ ] Water appears in crafting recipe counts
+- [ ] Water can be consumed for recipes (murky water, etc.)
+- [ ] Collector contents persist correctly after use
+
+#### Workstation Outputs (`pullFromWorkstationOutputs`)
+- [ ] Smelt iron in forge, leave in output slot
+- [ ] Iron appears in crafting recipe counts
+- [ ] Iron can be used for crafting directly from forge output
+- [ ] Only OUTPUT slots are used (not fuel/input)
+- [ ] Works with: Forge, Campfire, Chemistry Station, Cement Mixer
+
+### New Feature Patches
+
+#### Painting (`enableForPainting`)
+- [ ] Put paint cans in nearby container
+- [ ] Equip paint brush (no paint in inventory)
+- [ ] Paint tool shows available (checks containers)
+- [ ] Successfully paint a block (consumes from container)
+- [ ] Works in: Single paint, Paint all faces, Flood fill modes
+
+#### Lockpicking (`enableForLockpicking`)
+- [ ] Put lockpicks in nearby container
+- [ ] Find a locked container/safe (no lockpicks in inventory)
+- [ ] "Pick Lock" option available
+- [ ] Successfully pick lock (consumes lockpick from container)
+
+#### Generator Refuel (`enableForGeneratorRefuel`)
+- [ ] Put gas cans in nearby container
+- [ ] Place generator and connect power (no gas in inventory)
+- [ ] Open generator UI
+- [ ] "Refuel" button works
+- [ ] Gas consumed from container
+
+#### Item Repair (`enableForItemRepair`)
+- [ ] Put repair kits in nearby container
+- [ ] Equip damaged weapon/tool (no repair kits in inventory)
+- [ ] Open item radial menu
+- [ ] "Repair" option available and works
+- [ ] Repair kit consumed from container
+
+### Regression Tests (Existing Features)
+
+- [ ] Crafting from containers still works
+- [ ] Weapon reload from containers still works
+- [ ] Vehicle refuel from containers still works
+- [ ] Block repair/upgrade from containers still works
+- [ ] Trader purchases with dukes from containers still works
+- [ ] Challenge tracker counts items in containers
+
+### Edge Cases
+
+- [ ] Range limit respected for new storage sources
+- [ ] Locked containers respected (`allowLockedContainers` setting)
+- [ ] Multiplayer: Other players' containers not accessed
+- [ ] Performance: No noticeable lag with many drones/workstations
+- [ ] Config toggle: Each feature can be disabled independently
+
+### Config File
+
+- [ ] New options appear in config.json after update
+- [ ] Default values are all `true`
+- [ ] Setting to `false` disables the feature
+- [ ] Old configs (without new options) work with defaults
 
 ---
 
