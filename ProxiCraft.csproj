@@ -30,6 +30,7 @@
     <Compile Include="ProxiCraft\ModCompatibility.cs" />
     <Compile Include="ProxiCraft\SafePatcher.cs" />
     <Compile Include="ProxiCraft\AdaptivePatching.cs" />
+    <Compile Include="ProxiCraft\RobustTranspiler.cs" />
     <Compile Include="ProxiCraft\ConsoleCmdProxiCraft.cs" />
   </ItemGroup>
 

@@ -444,11 +444,18 @@ public class ProxiCraft : IModApi
     /// 
     /// BACKPACK COMPATIBILITY: Uses Postfix to add container items AFTER inventory is queried.
     /// This works regardless of how backpack mods change inventory structure.
+    ///
+    /// ROBUSTNESS:
+    /// - Checks for transpiler conflicts before patching
+    /// - Returns original code if pattern not found
+    /// - Records status for runtime checks
     /// </summary>
     [HarmonyPatch(typeof(ItemActionEntryCraft), "OnActivated")]
     [HarmonyPriority(Priority.Low)]
     private static class ItemActionEntryCraft_OnActivated_Patch
     {
+        private const string FEATURE_ID = "CraftOnActivated";
+
         // Use Transpiler to inject after GetAllItemStacks - adds container items to result
         public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions, ILGenerator generator)
         {
@@ -457,36 +464,22 @@ public class ProxiCraft : IModApi
             if (AdaptivePatching.HasTranspilerConflict(targetMethodInfo))
             {
                 LogWarning("ItemActionEntryCraft.OnActivated has Transpiler conflict - using fallback");
+                RobustTranspiler.RecordTranspilerStatus(FEATURE_ID, false);
                 return instructions; // Return unchanged, rely on other patches
             }
 
-            var codes = new List<CodeInstruction>(instructions);
-            var targetMethod = AccessTools.Method(typeof(XUiM_PlayerInventory), nameof(XUiM_PlayerInventory.GetAllItemStacks));
-            var injectedMethod = AccessTools.Method(typeof(ProxiCraft), nameof(AddContainerItems));
-            
-            bool patched = false;
-            
-            for (int i = 0; i < codes.Count; i++)
+            return RobustTranspiler.SafeTranspile(instructions, FEATURE_ID, codes =>
             {
-                if ((codes[i].opcode == OpCodes.Call || codes[i].opcode == OpCodes.Callvirt) && 
-                    codes[i].operand is MethodInfo calledMethod && 
-                    calledMethod == targetMethod)
-                {
-                    // Insert our method call right after GetAllItemStacks
-                    // This is ADDITIVE - we take whatever inventory returns and add to it
-                    codes.Insert(i + 1, new CodeInstruction(OpCodes.Call, injectedMethod));
-                    LogDebug("Patched ItemActionEntryCraft.OnActivated (additive)");
-                    patched = true;
-                    break;
-                }
-            }
-            
-            if (!patched)
-            {
-                LogWarning("ItemActionEntryCraft.OnActivated - GetAllItemStacks not found (backpack mod may have changed it)");
-            }
-            
-            return codes.AsEnumerable();
+                var injectedMethod = AccessTools.Method(typeof(ProxiCraft), nameof(AddContainerItems));
+
+                // Inject our method call after GetAllItemStacks
+                return RobustTranspiler.TryInjectAfterMethodCall(
+                    codes,
+                    typeof(XUiM_PlayerInventory),
+                    nameof(XUiM_PlayerInventory.GetAllItemStacks),
+                    injectedMethod,
+                    FEATURE_ID);
+            });
         }
     }
 
@@ -541,6 +534,8 @@ public class ProxiCraft : IModApi
     [HarmonyPriority(Priority.Low)]
     private static class XUiC_RecipeCraftCount_calcMaxCraftable_Patch
     {
+        private const string FEATURE_ID = "CraftMaxCraftable";
+
         public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
         {
             // Check for conflicts
@@ -548,44 +543,42 @@ public class ProxiCraft : IModApi
             if (AdaptivePatching.HasTranspilerConflict(methodToCheck))
             {
                 LogWarning("XUiC_RecipeCraftCount.calcMaxCraftable has conflict - skipping Transpiler");
+                RobustTranspiler.RecordTranspilerStatus(FEATURE_ID, false);
                 return instructions;
             }
 
-            var codes = new List<CodeInstruction>(instructions);
-            var targetMethod = AccessTools.Method(typeof(XUiM_PlayerInventory), nameof(XUiM_PlayerInventory.GetAllItemStacks));
-            var injectedMethod = AccessTools.Method(typeof(ProxiCraft), nameof(AddContainerItemsArray));
-            
-            bool patched = false;
-            
-            for (int i = 0; i < codes.Count; i++)
+            return RobustTranspiler.SafeTranspile(instructions, FEATURE_ID, codes =>
             {
-                if ((codes[i].opcode == OpCodes.Call || codes[i].opcode == OpCodes.Callvirt) && 
-                    codes[i].operand is MethodInfo calledMethod && 
-                    calledMethod == targetMethod)
+                var injectedMethod = AccessTools.Method(typeof(ProxiCraft), nameof(AddContainerItemsArray));
+
+                // Find GetAllItemStacks call
+                int getAllIdx = RobustTranspiler.FindMethodCall(
+                    codes,
+                    typeof(XUiM_PlayerInventory),
+                    nameof(XUiM_PlayerInventory.GetAllItemStacks));
+
+                if (getAllIdx == -1)
                 {
-                    // Find the ToArray call and insert after it
-                    for (int j = i + 1; j < Math.Min(i + 5, codes.Count); j++)
-                    {
-                        if (codes[j].opcode == OpCodes.Callvirt && 
-                            codes[j].operand is MethodInfo toArrayMethod &&
-                            toArrayMethod.Name == "ToArray")
-                        {
-                            codes.Insert(j + 1, new CodeInstruction(OpCodes.Call, injectedMethod));
-                            LogDebug("Patched XUiC_RecipeCraftCount.calcMaxCraftable (additive)");
-                            patched = true;
-                            break;
-                        }
-                    }
-                    break;
+                    LogDebug($"[{FEATURE_ID}] GetAllItemStacks not found");
+                    return false;
                 }
-            }
-            
-            if (!patched)
-            {
-                LogDebug("XUiC_RecipeCraftCount.calcMaxCraftable - pattern not matched");
-            }
-            
-            return codes.AsEnumerable();
+
+                // Find the ToArray call after GetAllItemStacks (within 5 instructions)
+                for (int j = getAllIdx + 1; j < Math.Min(getAllIdx + 6, codes.Count); j++)
+                {
+                    if (codes[j].opcode == OpCodes.Callvirt &&
+                        codes[j].operand is MethodInfo toArrayMethod &&
+                        toArrayMethod.Name == "ToArray")
+                    {
+                        codes.Insert(j + 1, new CodeInstruction(OpCodes.Call, injectedMethod));
+                        LogDebug($"[{FEATURE_ID}] Injected after ToArray at IL index {j}");
+                        return true;
+                    }
+                }
+
+                LogDebug($"[{FEATURE_ID}] ToArray not found after GetAllItemStacks");
+                return false;
+            });
         }
     }
 
@@ -630,32 +623,41 @@ public class ProxiCraft : IModApi
     /// <summary>
     /// Patch ingredient entry to show correct item counts including containers.
     /// BACKUP: This Transpiler is a backup in case GetItemCount isn't called.
+    ///
+    /// ROBUSTNESS:
+    /// - Uses safe transpiler wrapper
+    /// - Returns original code if pattern not found
     /// </summary>
     [HarmonyPatch(typeof(XUiC_IngredientEntry), "GetBindingValueInternal")]
     [HarmonyPriority(Priority.Low)]
     private static class XUiC_IngredientEntry_GetBindingValueInternal_Patch
     {
+        private const string FEATURE_ID = "IngredientBinding";
+
         public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
         {
-            var codes = new List<CodeInstruction>(instructions);
-            var targetMethod = AccessTools.Method(typeof(XUiM_PlayerInventory), "GetItemCount", new Type[] { typeof(ItemValue) });
-            
-            for (int i = 0; i < codes.Count; i++)
+            return RobustTranspiler.SafeTranspile(instructions, FEATURE_ID, codes =>
             {
-                if ((codes[i].opcode == OpCodes.Call || codes[i].opcode == OpCodes.Callvirt) && 
-                    codes[i].operand is MethodInfo method && 
-                    method == targetMethod)
+                int getItemCountIdx = RobustTranspiler.FindMethodCall(
+                    codes,
+                    typeof(XUiM_PlayerInventory),
+                    "GetItemCount",
+                    new Type[] { typeof(ItemValue) });
+
+                if (getItemCountIdx == -1)
                 {
-                    // Add call to include container counts (ADDITIVE)
-                    var injectedMethod = AccessTools.Method(typeof(ProxiCraft), nameof(AddIngredientContainerCount));
-                    codes.Insert(i + 1, new CodeInstruction(OpCodes.Call, injectedMethod));
-                    codes.Insert(i + 1, new CodeInstruction(OpCodes.Ldarg_0)); // Load 'this' for ingredient info
-                    LogDebug("Patched XUiC_IngredientEntry.GetBindingValueInternal (additive count)");
-                    break;
+                    LogDebug($"[{FEATURE_ID}] GetItemCount not found");
+                    return false;
                 }
-            }
-            
-            return codes.AsEnumerable();
+
+                // Insert our method call after GetItemCount (add Ldarg_0 first for 'this')
+                var injectedMethod = AccessTools.Method(typeof(ProxiCraft), nameof(AddIngredientContainerCount));
+                codes.Insert(getItemCountIdx + 1, new CodeInstruction(OpCodes.Ldarg_0)); // Load 'this' for ingredient info
+                codes.Insert(getItemCountIdx + 2, new CodeInstruction(OpCodes.Call, injectedMethod));
+
+                LogDebug($"[{FEATURE_ID}] Injected after GetItemCount at IL index {getItemCountIdx}");
+                return true;
+            });
         }
     }
 
@@ -848,49 +850,67 @@ public class ProxiCraft : IModApi
     
     /// <summary>
     /// Patch AnimatorRangedReloadState to get ammo from containers.
+    ///
+    /// ROBUSTNESS:
+    /// - Uses safe transpiler wrapper
+    /// - Patches both GetItemCount (for counting) and DecItem (for removal)
+    /// - Returns original code if patterns not found
     /// </summary>
     [HarmonyPatch(typeof(AnimatorRangedReloadState), "GetAmmoCountToReload")]
     [HarmonyPriority(Priority.Low)]
     private static class AnimatorRangedReloadState_GetAmmoCountToReload_Patch
     {
+        private const string FEATURE_ID = "ReloadAmmo";
+
         public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
         {
             if (!Config?.enableForReload == true)
                 return instructions;
-            
-            var codes = new List<CodeInstruction>(instructions);
-            var getItemCountMethod = AccessTools.Method(typeof(Inventory), "GetItemCount", 
-                new Type[] { typeof(ItemValue), typeof(bool), typeof(int), typeof(int), typeof(bool) });
-            
-            for (int i = 0; i < codes.Count; i++)
+
+            return RobustTranspiler.SafeTranspile(instructions, FEATURE_ID, codes =>
             {
-                if ((codes[i].opcode == OpCodes.Call || codes[i].opcode == OpCodes.Callvirt) && 
-                    codes[i].operand is MethodInfo method && 
-                    method == getItemCountMethod)
+                bool anyPatched = false;
+
+                // Patch GetItemCount calls to add container counts
+                var getItemCountIndices = RobustTranspiler.FindAllMethodCalls(
+                    codes,
+                    typeof(Inventory),
+                    "GetItemCount",
+                    new Type[] { typeof(ItemValue), typeof(bool), typeof(int), typeof(int), typeof(bool) });
+
+                foreach (int idx in getItemCountIndices)
                 {
                     var injectedMethod = AccessTools.Method(typeof(ProxiCraft), nameof(AddReloadContainerCount));
-                    codes.Insert(i + 1, new CodeInstruction(OpCodes.Call, injectedMethod));
-                    codes.Insert(i + 1, new CodeInstruction(OpCodes.Ldarg_2)); // item value parameter
-                    LogDebug("Patched AnimatorRangedReloadState.GetAmmoCountToReload (GetItemCount)");
+                    codes.Insert(idx + 1, new CodeInstruction(OpCodes.Ldarg_2)); // item value parameter
+                    codes.Insert(idx + 2, new CodeInstruction(OpCodes.Call, injectedMethod));
+                    LogDebug($"[{FEATURE_ID}] Injected after GetItemCount at IL index {idx}");
+                    anyPatched = true;
                 }
-            }
 
-            // Also patch DecItem to remove from containers
-            var decItemMethod = AccessTools.Method(typeof(Inventory), "DecItem");
-            for (int i = 0; i < codes.Count; i++)
-            {
-                if ((codes[i].opcode == OpCodes.Call || codes[i].opcode == OpCodes.Callvirt) && 
-                    codes[i].operand is MethodInfo method && 
-                    method == decItemMethod)
+                // Patch DecItem calls to remove from containers
+                var decItemMethod = AccessTools.Method(typeof(ProxiCraft), nameof(DecItemForReload));
+                var decItemIndices = RobustTranspiler.FindAllMethodCalls(
+                    codes,
+                    typeof(Inventory),
+                    "DecItem");
+
+                // Note: indices may have shifted after inserting above, but we're replacing in-place
+                for (int i = 0; i < codes.Count; i++)
                 {
-                    // Replace with our wrapper that also removes from containers
-                    codes[i].operand = AccessTools.Method(typeof(ProxiCraft), nameof(DecItemForReload));
-                    codes[i].opcode = OpCodes.Call;
-                    LogDebug("Patched AnimatorRangedReloadState.GetAmmoCountToReload (DecItem)");
+                    if ((codes[i].opcode == OpCodes.Call || codes[i].opcode == OpCodes.Callvirt) &&
+                        codes[i].operand is MethodInfo method &&
+                        method.DeclaringType == typeof(Inventory) &&
+                        method.Name == "DecItem")
+                    {
+                        codes[i].operand = decItemMethod;
+                        codes[i].opcode = OpCodes.Call;
+                        LogDebug($"[{FEATURE_ID}] Replaced DecItem at IL index {i}");
+                        anyPatched = true;
+                    }
                 }
-            }
-            
-            return codes.AsEnumerable();
+
+                return anyPatched;
+            });
         }
     }
 
@@ -971,33 +991,35 @@ public class ProxiCraft : IModApi
 
     /// <summary>
     /// Patch EntityVehicle.takeFuel to use fuel from containers.
+    ///
+    /// ROBUSTNESS:
+    /// - Uses signature-based method matching (survives minor refactors)
+    /// - Returns original code if pattern not found (no crash)
+    /// - Records status for runtime feature checks
     /// </summary>
     [HarmonyPatch(typeof(EntityVehicle), "takeFuel")]
     [HarmonyPriority(Priority.Low)]
     private static class EntityVehicle_takeFuel_Patch
     {
+        private const string FEATURE_ID = "VehicleRefuel";
+
         public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
         {
             if (!Config?.enableForRefuel == true)
                 return instructions;
 
-            var codes = new List<CodeInstruction>(instructions);
-            var decItemMethod = AccessTools.Method(typeof(Bag), "DecItem");
-            
-            for (int i = 0; i < codes.Count; i++)
+            return RobustTranspiler.SafeTranspile(instructions, FEATURE_ID, codes =>
             {
-                if ((codes[i].opcode == OpCodes.Call || codes[i].opcode == OpCodes.Callvirt) && 
-                    codes[i].operand is MethodInfo method && 
-                    method == decItemMethod)
-                {
-                    codes[i].operand = AccessTools.Method(typeof(ProxiCraft), nameof(DecItemForRefuel));
-                    codes[i].opcode = OpCodes.Call;
-                    LogDebug("Patched EntityVehicle.takeFuel");
-                    break;
-                }
-            }
-            
-            return codes.AsEnumerable();
+                var replacementMethod = AccessTools.Method(typeof(ProxiCraft), nameof(DecItemForRefuel));
+
+                // Try to find and replace Bag.DecItem call
+                return RobustTranspiler.TryReplaceMethodCall(
+                    codes,
+                    typeof(Bag),
+                    nameof(Bag.DecItem),
+                    replacementMethod,
+                    FEATURE_ID);
+            });
         }
     }
 
@@ -1742,42 +1764,35 @@ public class ProxiCraft : IModApi
     /// <summary>
     /// Patch XUiC_PowerSourceStats.BtnRefuel_OnPress to use fuel from containers.
     /// Uses TRANSPILER to replace Bag.DecItem with our wrapper.
+    ///
+    /// ROBUSTNESS:
+    /// - Uses signature-based method matching (survives minor refactors)
+    /// - Returns original code if pattern not found (no crash)
+    /// - Records status for runtime feature checks
     /// </summary>
     [HarmonyPatch(typeof(XUiC_PowerSourceStats), nameof(XUiC_PowerSourceStats.BtnRefuel_OnPress))]
     [HarmonyPriority(Priority.Low)]
     private static class XUiC_PowerSourceStats_BtnRefuel_OnPress_Patch
     {
+        private const string FEATURE_ID = "GeneratorRefuel";
+
         public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
         {
             if (!Config?.enableForGeneratorRefuel == true)
                 return instructions;
 
-            var codes = new List<CodeInstruction>(instructions);
-            var decItemMethod = AccessTools.Method(typeof(Bag), nameof(Bag.DecItem));
-
-            bool patched = false;
-
-            for (int i = 0; i < codes.Count; i++)
+            return RobustTranspiler.SafeTranspile(instructions, FEATURE_ID, codes =>
             {
-                if ((codes[i].opcode == OpCodes.Call || codes[i].opcode == OpCodes.Callvirt) &&
-                    codes[i].operand is MethodInfo method &&
-                    method == decItemMethod)
-                {
-                    // Replace Bag.DecItem with our wrapper
-                    codes[i].operand = AccessTools.Method(typeof(ProxiCraft), nameof(DecItemForGeneratorRefuel));
-                    codes[i].opcode = OpCodes.Call;
-                    LogDebug("Patched XUiC_PowerSourceStats.BtnRefuel_OnPress");
-                    patched = true;
-                    break;
-                }
-            }
+                var replacementMethod = AccessTools.Method(typeof(ProxiCraft), nameof(DecItemForGeneratorRefuel));
 
-            if (!patched)
-            {
-                LogDebug("XUiC_PowerSourceStats.BtnRefuel_OnPress - Bag.DecItem not found");
-            }
-
-            return codes.AsEnumerable();
+                // Try to find and replace Bag.DecItem call
+                return RobustTranspiler.TryReplaceMethodCall(
+                    codes,
+                    typeof(Bag),
+                    nameof(Bag.DecItem),
+                    replacementMethod,
+                    FEATURE_ID);
+            });
         }
     }
 
