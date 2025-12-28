@@ -24,6 +24,9 @@ Analysis/
 GameCode/
 Decompiled/
 
+# Third-party mod analysis (reference only, not part of this project)
+temp_analysis/
+
 # NuGet
 packages/
 *.nupkg
