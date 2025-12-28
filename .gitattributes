@@ -1,0 +1,3 @@
+# Ensure binary files are handled correctly (no caching issues)
+*.zip binary
+*.dll binary
