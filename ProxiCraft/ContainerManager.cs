@@ -332,10 +332,290 @@ public static class ContainerManager
                     }
                 }
             }
+
+            // ================================================================
+            // COUNT FROM ADDITIONAL STORAGE SOURCES
+            // These are not TileEntities in chunks, so we scan them separately
+            // ================================================================
+
+            // Count from vehicles
+            if (config.pullFromVehicles)
+            {
+                count += CountItemsInVehicles(world, playerPos, config, item);
+            }
+
+            // Count from drones
+            if (config.pullFromDrones)
+            {
+                count += CountItemsInDrones(world, playerPos, config, item);
+            }
+
+            // Count from dew collectors (TileEntityCollector)
+            if (config.pullFromDewCollectors)
+            {
+                count += CountItemsInDewCollectors(world, playerPos, config, item, openContainerPos);
+            }
+
+            // Count from workstation outputs (TileEntityWorkstation)
+            if (config.pullFromWorkstationOutputs)
+            {
+                count += CountItemsInWorkstationOutputs(world, playerPos, config, item, openContainerPos);
+            }
         }
         catch (Exception ex)
         {
             ProxiCraft.LogError($"Error counting items: {ex.Message}");
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Counts items in nearby vehicles owned by the player.
+    /// </summary>
+    private static int CountItemsInVehicles(World world, Vector3 playerPos, ModConfig config, ItemValue item)
+    {
+        int count = 0;
+        var entities = world.Entities?.list;
+        if (entities == null) return 0;
+
+        foreach (var entity in entities)
+        {
+            if (entity == null || !(entity is EntityVehicle vehicle))
+                continue;
+
+            try
+            {
+                // Range check
+                if (config.range > 0f && Vector3.Distance(playerPos, vehicle.position) >= config.range)
+                    continue;
+
+                // Only include vehicles owned by the local player
+                if (!vehicle.LocalPlayerIsOwner())
+                    continue;
+
+                // Check if vehicle has storage
+                if (!vehicle.hasStorage())
+                    continue;
+
+                var bag = ((EntityAlive)vehicle).bag;
+                if (bag == null) continue;
+
+                var slots = bag.GetSlots();
+                if (slots == null) continue;
+
+                foreach (var stack in slots)
+                {
+                    if (stack?.itemValue?.type == item.type)
+                        count += stack.count;
+                }
+            }
+            catch (Exception ex)
+            {
+                ProxiCraft.LogDebug($"Error counting vehicle items: {ex.Message}");
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Counts items in the player's drone storage.
+    /// </summary>
+    private static int CountItemsInDrones(World world, Vector3 playerPos, ModConfig config, ItemValue item)
+    {
+        int count = 0;
+        var entities = world.Entities?.list;
+        if (entities == null) return 0;
+
+        foreach (var entity in entities)
+        {
+            if (entity == null || !(entity is EntityDrone drone))
+                continue;
+
+            try
+            {
+                // Range check
+                if (config.range > 0f && Vector3.Distance(playerPos, drone.position) >= config.range)
+                    continue;
+
+                // Only include drones owned by the local player
+                if (!drone.IsOwner(PlatformManager.InternalLocalUserIdentifier))
+                    continue;
+
+                // Skip if drone is in a bad state
+                if (drone.isInteractionLocked || drone.isOwnerSyncPending)
+                    continue;
+                if (drone.isShutdownPending || drone.isShutdown)
+                    continue;
+
+                // Check if user is allowed access
+                if (!drone.IsUserAllowed(PlatformManager.InternalLocalUserIdentifier))
+                    continue;
+
+                // Try lootContainer first
+                if (drone.lootContainer?.items != null)
+                {
+                    foreach (var stack in drone.lootContainer.items)
+                    {
+                        if (stack?.itemValue?.type == item.type)
+                            count += stack.count;
+                    }
+                    continue;
+                }
+
+                // Fall back to bag
+                var droneBag = drone.bag;
+                if (droneBag == null) continue;
+
+                var slots = droneBag.GetSlots();
+                if (slots == null) continue;
+
+                foreach (var stack in slots)
+                {
+                    if (stack?.itemValue?.type == item.type)
+                        count += stack.count;
+                }
+            }
+            catch (Exception ex)
+            {
+                ProxiCraft.LogDebug($"Error counting drone items: {ex.Message}");
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Counts items in nearby dew collectors.
+    /// </summary>
+    private static int CountItemsInDewCollectors(World world, Vector3 playerPos, ModConfig config, ItemValue item, Vector3i skipPos)
+    {
+        int count = 0;
+
+        for (int clusterIdx = 0; clusterIdx < world.ChunkClusters.Count; clusterIdx++)
+        {
+            var cluster = world.ChunkClusters[clusterIdx];
+            if (cluster == null) continue;
+
+            var chunks = ((WorldChunkCache)cluster).chunks?.dict?.Values?.ToArray();
+            if (chunks == null) continue;
+
+            foreach (var chunk in chunks)
+            {
+                if (chunk == null) continue;
+
+                chunk.EnterReadLock();
+                try
+                {
+                    var tileEntityKeys = chunk.tileEntities?.dict?.Keys?.ToArray();
+                    if (tileEntityKeys == null) continue;
+
+                    foreach (var key in tileEntityKeys)
+                    {
+                        if (!chunk.tileEntities.dict.TryGetValue(key, out var tileEntity))
+                            continue;
+
+                        if (!(tileEntity is TileEntityCollector dewCollector))
+                            continue;
+
+                        var worldPos = tileEntity.ToWorldPos();
+
+                        // Skip if same as open container
+                        if (skipPos != Vector3i.zero && worldPos == skipPos)
+                            continue;
+
+                        // Range check
+                        if (config.range > 0f && Vector3.Distance(playerPos, (Vector3)worldPos) >= config.range)
+                            continue;
+
+                        // Skip if someone else is using it
+                        if (dewCollector.bUserAccessing)
+                            continue;
+
+                        var items = dewCollector.items;
+                        if (items == null) continue;
+
+                        foreach (var stack in items)
+                        {
+                            if (stack?.itemValue?.type == item.type)
+                                count += stack.count;
+                        }
+                    }
+                }
+                finally
+                {
+                    chunk.ExitReadLock();
+                }
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Counts items in nearby workstation output slots.
+    /// </summary>
+    private static int CountItemsInWorkstationOutputs(World world, Vector3 playerPos, ModConfig config, ItemValue item, Vector3i skipPos)
+    {
+        int count = 0;
+
+        for (int clusterIdx = 0; clusterIdx < world.ChunkClusters.Count; clusterIdx++)
+        {
+            var cluster = world.ChunkClusters[clusterIdx];
+            if (cluster == null) continue;
+
+            var chunks = ((WorldChunkCache)cluster).chunks?.dict?.Values?.ToArray();
+            if (chunks == null) continue;
+
+            foreach (var chunk in chunks)
+            {
+                if (chunk == null) continue;
+
+                chunk.EnterReadLock();
+                try
+                {
+                    var tileEntityKeys = chunk.tileEntities?.dict?.Keys?.ToArray();
+                    if (tileEntityKeys == null) continue;
+
+                    foreach (var key in tileEntityKeys)
+                    {
+                        if (!chunk.tileEntities.dict.TryGetValue(key, out var tileEntity))
+                            continue;
+
+                        if (!(tileEntity is TileEntityWorkstation workstation))
+                            continue;
+
+                        var worldPos = tileEntity.ToWorldPos();
+
+                        // Skip if same as open container
+                        if (skipPos != Vector3i.zero && worldPos == skipPos)
+                            continue;
+
+                        // Range check
+                        if (config.range > 0f && Vector3.Distance(playerPos, (Vector3)worldPos) >= config.range)
+                            continue;
+
+                        // Only process player-placed workstations
+                        if (!workstation.IsPlayerPlaced)
+                            continue;
+
+                        // Get output slots only (not input or fuel)
+                        var outputItems = workstation.Output;
+                        if (outputItems == null) continue;
+
+                        foreach (var stack in outputItems)
+                        {
+                            if (stack?.itemValue?.type == item.type)
+                                count += stack.count;
+                        }
+                    }
+                }
+                finally
+                {
+                    chunk.ExitReadLock();
+                }
+            }
         }
 
         return count;
