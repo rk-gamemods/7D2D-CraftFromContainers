@@ -400,6 +400,79 @@ With 100+ storage locations, this could be 100-400ms per UI update = LAG SPIKE.
 
 ---
 
+## Performance Profiler
+
+### Overview
+
+ProxiCraft includes a built-in performance profiler (`PerformanceProfiler.cs`) that tracks timing and cache statistics for key operations. Disabled by default to avoid any overhead.
+
+### Tracked Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `RebuildItemCountCache` | Full storage scan to rebuild item cache |
+| `GetItemCount` | Individual item count queries |
+| `RefreshStorages` | Container discovery scan |
+| `CountVehicles` | Vehicle storage enumeration |
+| `CountDrones` | Drone storage enumeration |
+| `CountDewCollectors` | Dew collector scanning |
+| `CountWorkstations` | Workstation output scanning |
+
+### Metrics Collected
+
+- **Call Count** - How many times operation was called
+- **Total Time** - Cumulative milliseconds
+- **Avg Time** - Average ms per call
+- **Min/Max Time** - Range of execution times
+- **Cache Hit Rate** - Percentage of queries served from cache
+
+### Console Commands
+
+```
+pc perf          - Brief status (is profiler on, basic stats)
+pc perf on       - Enable profiling (resets data)
+pc perf off      - Disable profiling
+pc perf reset    - Clear collected data
+pc perf report   - Detailed timing report
+```
+
+### Performance Optimizations Applied
+
+1. **Squared Distance Comparison** - Avoids expensive `sqrt()` in distance checks
+   ```csharp
+   // Before (expensive):
+   if (Vector3.Distance(a, b) >= range)
+   
+   // After (fast):
+   float dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+   if (dx*dx + dy*dy + dz*dz >= rangeSquared)
+   ```
+
+2. **Direct Dictionary Iteration** - Avoids allocation from `.ToArray()`
+   ```csharp
+   // Before (allocates array):
+   foreach (var chunk in dict.Values.ToArray())
+   
+   // After (zero allocation):
+   foreach (var kvp in dict)
+   ```
+
+3. **For Loops on Arrays** - Avoids enumerator allocation
+   ```csharp
+   // Before (allocates enumerator):
+   foreach (var item in array)
+   
+   // After (zero allocation):
+   for (int i = 0; i < array.Length; i++)
+   ```
+
+4. **Pre-computed Constants** - Calculate once, use many times
+   ```csharp
+   float rangeSquared = range * range; // Once before loop
+   ```
+
+---
+
 ## Patch Strategy Summary
 
 ### The Problem with UI-Layer Patches

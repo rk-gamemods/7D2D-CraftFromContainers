@@ -79,6 +79,7 @@ Open the console with F1 and use:
 | `pc fullcheck` | Full diagnostic report (for bug reports) |
 | `pc diag` | Show mod compatibility report |
 | `pc test` | Test container scanning (shows nearby items) |
+| `pc perf` | Performance profiler (see below) |
 | `pc conflicts` | Show detected mod conflicts |
 | `pc toggle` | Enable/disable mod temporarily |
 | `pc debug` | Toggle debug logging |
@@ -89,6 +90,20 @@ Open the console with F1 and use:
 2. **Check health**: `pc health` - Are all features working?
 3. **Test scanning**: `pc test` - Can mod see your containers?
 4. **Full report**: `pc fullcheck` - Copy this for bug reports
+
+### Performance Profiling
+
+If you experience lag, use the built-in profiler:
+
+| Command | Description |
+|---------|-------------|
+| `pc perf` | Show brief performance status |
+| `pc perf on` | Enable profiling (collects timing data) |
+| `pc perf off` | Disable profiling |
+| `pc perf reset` | Clear collected data |
+| `pc perf report` | Show detailed performance report |
+
+The profiler tracks timing for container scans, item counting, and cache operations. Share the output when reporting performance issues.
 
 ## Configuration
 
@@ -172,6 +187,7 @@ ProxiCraft/
 │   ├── StartupHealthCheck.cs      # Feature validation system
 │   ├── ModCompatibility.cs        # Conflict detection
 │   ├── ConsoleCmdProxiCraft.cs    # Console commands (pc)
+│   ├── PerformanceProfiler.cs     # Performance profiling system
 │   └── NetPackagePCLock.cs        # Multiplayer lock sync
 ├── Release/ProxiCraft/            # Ready-to-deploy mod package
 │   ├── ProxiCraft.dll             # Compiled mod
@@ -287,9 +303,10 @@ When you have a container/vehicle/workstation UI open, items are counted directl
 4. If FAIL: Feature may need mod update for this game version
 
 ### Performance issues
-1. Reduce `range` (default 15 is recommended)
-2. Set `isDebug` to `false`
-3. Disable features you don't use
+1. Run `pc perf on`, play for a bit, then `pc perf report` to identify bottlenecks
+2. Reduce `range` (default 15 is recommended)
+3. Set `isDebug` to `false`
+4. Disable features you don't use
 
 ### After game update
 1. Run `pc health` - Check which features broke

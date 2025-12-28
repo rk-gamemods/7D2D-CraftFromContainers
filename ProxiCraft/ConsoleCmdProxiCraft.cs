@@ -39,16 +39,26 @@ Commands:
   fullcheck  - Full diagnostic report (for bug reports)
   diag       - Show mod compatibility report
   test       - Test container scanning (shows nearby containers)
+  perf       - Performance profiler (pc perf on/off/reset/report)
   reload     - Reload configuration from config.json
   toggle     - Toggle mod on/off
   conflicts  - Show detected mod conflicts
   debug      - Toggle debug logging
+
+Performance Commands:
+  pc perf          - Show brief performance status
+  pc perf on       - Enable profiling (collects timing data)
+  pc perf off      - Disable profiling
+  pc perf reset    - Clear profiling data
+  pc perf report   - Show detailed performance report
 
 Examples:
   pc status
   pc health
   pc fullcheck
   pc test
+  pc perf on
+  pc perf report
 ";
     }
 
@@ -101,6 +111,11 @@ Examples:
                     
                 case "debug":
                     ToggleDebug();
+                    break;
+                
+                case "perf":
+                case "performance":
+                    HandlePerfCommand(_params);
                     break;
                     
                 default:
@@ -335,6 +350,69 @@ Examples:
         foreach (var line in report.Split('\n'))
         {
             Output(line);
+        }
+    }
+
+    private void HandlePerfCommand(List<string> args)
+    {
+        string subCmd = args.Count >= 2 ? args[1].ToLowerInvariant() : "";
+        
+        switch (subCmd)
+        {
+            case "on":
+            case "enable":
+                PerformanceProfiler.IsEnabled = true;
+                PerformanceProfiler.Reset(); // Start fresh when enabling
+                Output("Performance profiler ENABLED. Use 'pc perf' or 'pc perf report' to view results.");
+                break;
+                
+            case "off":
+            case "disable":
+                PerformanceProfiler.IsEnabled = false;
+                Output("Performance profiler DISABLED.");
+                break;
+                
+            case "reset":
+            case "clear":
+                PerformanceProfiler.Reset();
+                Output("Performance profiler data cleared.");
+                break;
+                
+            case "report":
+            case "full":
+                ShowPerfReport(detailed: true);
+                break;
+                
+            default:
+                // Show brief status
+                ShowPerfReport(detailed: false);
+                break;
+        }
+    }
+
+    private void ShowPerfReport(bool detailed)
+    {
+        Output("=== ProxiCraft Performance ===");
+        Output($"  Profiler: {(PerformanceProfiler.IsEnabled ? "ENABLED" : "DISABLED")}");
+        Output("");
+        
+        if (!PerformanceProfiler.IsEnabled && !PerformanceProfiler.HasData)
+        {
+            Output("  No data collected. Use 'pc perf on' to enable profiling.");
+            return;
+        }
+        
+        if (detailed)
+        {
+            string report = PerformanceProfiler.GetReport();
+            foreach (var line in report.Split('\n'))
+            {
+                Output(line);
+            }
+        }
+        else
+        {
+            Output(PerformanceProfiler.GetBriefStatus());
         }
     }
 }

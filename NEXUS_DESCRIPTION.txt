@@ -199,6 +199,9 @@ Press F1 to open the console, then type:
 [*][b]pc conflicts[/b] - Check for problems with other mods
 [*][b]pc toggle[/b] - Turn the mod on or off
 [*][b]pc refresh[/b] - Clear the container cache
+[*][b]pc perf[/b] - Show performance status
+[*][b]pc perf on[/b] - Enable performance profiling
+[*][b]pc perf report[/b] - Show detailed timing report
 [/list]
 
 [line]

@@ -298,6 +298,8 @@ public static class ContainerManager
         if (!config.modEnabled || item == null)
             return 0;
 
+        PerformanceProfiler.StartTimer(PerformanceProfiler.OP_GET_ITEM_COUNT);
+
         try
         {
             float currentTime = Time.time;
@@ -307,6 +309,8 @@ public static class ContainerManager
             // This handles the common case of checking multiple recipe ingredients in one update
             if (_itemCountCacheValid && currentFrame == _lastItemCountFrame)
             {
+                PerformanceProfiler.RecordCacheHit(PerformanceProfiler.OP_GET_ITEM_COUNT);
+                PerformanceProfiler.StopTimer(PerformanceProfiler.OP_GET_ITEM_COUNT);
                 return _itemCountCache.TryGetValue(item.type, out int frameCount) ? frameCount : 0;
             }
             
@@ -315,17 +319,22 @@ public static class ContainerManager
                 (currentTime - _lastItemCountTime) < ITEM_COUNT_CACHE_DURATION &&
                 _itemCountCache.TryGetValue(item.type, out int cachedCount))
             {
+                PerformanceProfiler.RecordCacheHit(PerformanceProfiler.OP_GET_ITEM_COUNT);
+                PerformanceProfiler.StopTimer(PerformanceProfiler.OP_GET_ITEM_COUNT);
                 return cachedCount;
             }
 
             // Cache miss or expired - rebuild the entire cache
+            PerformanceProfiler.RecordCacheMiss(PerformanceProfiler.OP_GET_ITEM_COUNT);
             RebuildItemCountCache(config);
             
+            PerformanceProfiler.StopTimer(PerformanceProfiler.OP_GET_ITEM_COUNT);
             // Return the count (may be 0 if item not in storage)
             return _itemCountCache.TryGetValue(item.type, out int count) ? count : 0;
         }
         catch (Exception ex)
         {
+            PerformanceProfiler.StopTimer(PerformanceProfiler.OP_GET_ITEM_COUNT);
             ProxiCraft.LogError($"Error counting items: {ex.Message}");
             return 0;
         }
@@ -337,6 +346,8 @@ public static class ContainerManager
     /// </summary>
     private static void RebuildItemCountCache(ModConfig config)
     {
+        PerformanceProfiler.StartTimer(PerformanceProfiler.OP_REBUILD_CACHE);
+        
         _itemCountCache.Clear();
         _lastItemCountTime = Time.time;
         _lastItemCountFrame = Time.frameCount;
@@ -347,9 +358,13 @@ public static class ContainerManager
             var world = GameManager.Instance?.World;
             var player = world?.GetPrimaryPlayer();
             if (player == null)
+            {
+                PerformanceProfiler.StopTimer(PerformanceProfiler.OP_REBUILD_CACHE);
                 return;
+            }
 
             Vector3 playerPos = player.position;
+            float rangeSquared = config.range > 0f ? config.range * config.range : -1f;
             
             // Track open container position to avoid double-counting
             Vector3i openContainerPos = CurrentOpenContainerPos;
@@ -357,8 +372,10 @@ public static class ContainerManager
             // FIRST: Count from open container via cached reference (live data)
             if (CurrentOpenContainer?.items != null)
             {
-                foreach (var stack in CurrentOpenContainer.items)
+                var items = CurrentOpenContainer.items;
+                for (int i = 0; i < items.Length; i++)
                 {
+                    var stack = items[i];
                     if (stack?.itemValue != null && !stack.IsEmpty())
                         AddToCountCache(stack.itemValue.type, stack.count);
                 }
@@ -374,8 +391,9 @@ public static class ContainerManager
                     var slots = vehicleBag.GetSlots();
                     if (slots != null)
                     {
-                        foreach (var stack in slots)
+                        for (int i = 0; i < slots.Length; i++)
                         {
+                            var stack = slots[i];
                             if (stack?.itemValue != null && !stack.IsEmpty())
                                 AddToCountCache(stack.itemValue.type, stack.count);
                         }
@@ -390,8 +408,9 @@ public static class ContainerManager
                 var output = CurrentOpenWorkstation.Output;
                 if (output != null)
                 {
-                    foreach (var stack in output)
+                    for (int i = 0; i < output.Length; i++)
                     {
+                        var stack = output[i];
                         if (stack?.itemValue != null && !stack.IsEmpty())
                             AddToCountCache(stack.itemValue.type, stack.count);
                     }
@@ -399,28 +418,33 @@ public static class ContainerManager
             }
             
             // Scan closed containers from TileEntities
-            for (int clusterIdx = 0; clusterIdx < world.ChunkClusters.Count; clusterIdx++)
+            PerformanceProfiler.StartTimer(PerformanceProfiler.OP_COUNT_CONTAINERS);
+            int clusterCount = world.ChunkClusters.Count;
+            for (int clusterIdx = 0; clusterIdx < clusterCount; clusterIdx++)
             {
                 var cluster = world.ChunkClusters[clusterIdx];
                 if (cluster == null) continue;
 
-                var chunks = ((WorldChunkCache)cluster).chunks?.dict?.Values?.ToArray();
-                if (chunks == null) continue;
+                var chunkDict = ((WorldChunkCache)cluster).chunks?.dict;
+                if (chunkDict == null) continue;
 
-                foreach (var chunk in chunks)
+                // Iterate directly over dictionary to avoid ToArray() allocation
+                foreach (var chunkKvp in chunkDict)
                 {
+                    var chunk = chunkKvp.Value;
                     if (chunk == null) continue;
 
                     chunk.EnterReadLock();
                     try
                     {
-                        var tileEntityKeys = chunk.tileEntities?.dict?.Keys?.ToArray();
-                        if (tileEntityKeys == null) continue;
+                        var tileEntityDict = chunk.tileEntities?.dict;
+                        if (tileEntityDict == null) continue;
 
-                        foreach (var key in tileEntityKeys)
+                        // Iterate directly to avoid ToArray() allocation
+                        foreach (var teKvp in tileEntityDict)
                         {
-                            if (!chunk.tileEntities.dict.TryGetValue(key, out var tileEntity))
-                                continue;
+                            var tileEntity = teKvp.Value;
+                            if (tileEntity == null) continue;
 
                             var worldPos = tileEntity.ToWorldPos();
                             
@@ -428,9 +452,15 @@ public static class ContainerManager
                             if (openContainerPos != Vector3i.zero && worldPos == openContainerPos)
                                 continue;
                             
-                            // Range check
-                            if (config.range > 0f && Vector3.Distance(playerPos, (Vector3)worldPos) >= config.range)
-                                continue;
+                            // Range check using squared distance (avoids sqrt)
+                            if (rangeSquared > 0f)
+                            {
+                                float dx = playerPos.x - worldPos.x;
+                                float dy = playerPos.y - worldPos.y;
+                                float dz = playerPos.z - worldPos.z;
+                                if (dx * dx + dy * dy + dz * dz >= rangeSquared)
+                                    continue;
+                            }
 
                             // Skip locked containers in multiplayer
                             if (LockedList.Contains(worldPos))
@@ -445,6 +475,7 @@ public static class ContainerManager
                     }
                 }
             }
+            PerformanceProfiler.StopTimer(PerformanceProfiler.OP_COUNT_CONTAINERS);
 
             // ================================================================
             // COUNT FROM ADDITIONAL STORAGE SOURCES
@@ -453,29 +484,40 @@ public static class ContainerManager
             // Count from vehicles
             if (config.pullFromVehicles)
             {
+                PerformanceProfiler.StartTimer(PerformanceProfiler.OP_COUNT_VEHICLES);
                 CountAllVehicleItems(world, playerPos, config);
+                PerformanceProfiler.StopTimer(PerformanceProfiler.OP_COUNT_VEHICLES);
             }
 
             // Count from drones
             if (config.pullFromDrones)
             {
+                PerformanceProfiler.StartTimer(PerformanceProfiler.OP_COUNT_DRONES);
                 CountAllDroneItems(world, playerPos, config);
+                PerformanceProfiler.StopTimer(PerformanceProfiler.OP_COUNT_DRONES);
             }
 
             // Count from dew collectors (TileEntityCollector)
             if (config.pullFromDewCollectors)
             {
+                PerformanceProfiler.StartTimer(PerformanceProfiler.OP_COUNT_DEWCOLLECTORS);
                 CountAllDewCollectorItems(world, playerPos, config, openContainerPos);
+                PerformanceProfiler.StopTimer(PerformanceProfiler.OP_COUNT_DEWCOLLECTORS);
             }
 
             // Count from workstation outputs (TileEntityWorkstation)
             if (config.pullFromWorkstationOutputs)
             {
+                PerformanceProfiler.StartTimer(PerformanceProfiler.OP_COUNT_WORKSTATIONS);
                 CountAllWorkstationOutputItems(world, playerPos, config, openContainerPos);
+                PerformanceProfiler.StopTimer(PerformanceProfiler.OP_COUNT_WORKSTATIONS);
             }
+            
+            PerformanceProfiler.StopTimer(PerformanceProfiler.OP_REBUILD_CACHE);
         }
         catch (Exception ex)
         {
+            PerformanceProfiler.StopTimer(PerformanceProfiler.OP_REBUILD_CACHE);
             ProxiCraft.LogError($"Error rebuilding item count cache: {ex.Message}");
             _itemCountCacheValid = false;
         }
@@ -538,44 +580,62 @@ public static class ContainerManager
     /// </summary>
     private static void CountAllVehicleItems(World world, Vector3 playerPos, ModConfig config)
     {
-        var entities = world.Entities?.list;
-        if (entities == null) return;
-
-        foreach (var entity in entities)
+        PerformanceProfiler.StartTimer(PerformanceProfiler.OP_COUNT_VEHICLES);
+        try
         {
-            if (entity == null || !(entity is EntityVehicle vehicle))
-                continue;
+            var entities = world.Entities?.list;
+            if (entities == null) return;
 
-            try
+            float rangeSquared = config.range > 0f ? config.range * config.range : 0f;
+
+            for (int i = 0; i < entities.Count; i++)
             {
-                // Skip the currently open vehicle - its data may be changing
-                // When vehicle storage is open, we count from the live UI data instead
-                if (CurrentOpenVehicle != null && vehicle.entityId == CurrentOpenVehicle.entityId)
-                    continue;
-                
-                if (config.range > 0f && Vector3.Distance(playerPos, vehicle.position) >= config.range)
-                    continue;
-                if (!vehicle.LocalPlayerIsOwner())
-                    continue;
-                if (!vehicle.hasStorage())
+                var entity = entities[i];
+                if (entity == null || !(entity is EntityVehicle vehicle))
                     continue;
 
-                var bag = ((EntityAlive)vehicle).bag;
-                if (bag == null) continue;
-
-                var slots = bag.GetSlots();
-                if (slots == null) continue;
-
-                foreach (var stack in slots)
+                try
                 {
-                    if (stack?.itemValue != null && !stack.IsEmpty())
-                        AddToCountCache(stack.itemValue.type, stack.count);
+                    // Skip the currently open vehicle - its data may be changing
+                    // When vehicle storage is open, we count from the live UI data instead
+                    if (CurrentOpenVehicle != null && vehicle.entityId == CurrentOpenVehicle.entityId)
+                        continue;
+                    
+                    if (rangeSquared > 0f)
+                    {
+                        float dx = playerPos.x - vehicle.position.x;
+                        float dy = playerPos.y - vehicle.position.y;
+                        float dz = playerPos.z - vehicle.position.z;
+                        if (dx * dx + dy * dy + dz * dz >= rangeSquared)
+                            continue;
+                    }
+                    if (!vehicle.LocalPlayerIsOwner())
+                        continue;
+                    if (!vehicle.hasStorage())
+                        continue;
+
+                    var bag = ((EntityAlive)vehicle).bag;
+                    if (bag == null) continue;
+
+                    var slots = bag.GetSlots();
+                    if (slots == null) continue;
+
+                    for (int j = 0; j < slots.Length; j++)
+                    {
+                        var stack = slots[j];
+                        if (stack?.itemValue != null && !stack.IsEmpty())
+                            AddToCountCache(stack.itemValue.type, stack.count);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ProxiCraft.LogDebug($"Error counting vehicle items: {ex.Message}");
                 }
             }
-            catch (Exception ex)
-            {
-                ProxiCraft.LogDebug($"Error counting vehicle items: {ex.Message}");
-            }
+        }
+        finally
+        {
+            PerformanceProfiler.StopTimer(PerformanceProfiler.OP_COUNT_VEHICLES);
         }
     }
 
@@ -586,44 +646,63 @@ public static class ContainerManager
     /// </summary>
     private static void CountAllDroneItems(World world, Vector3 playerPos, ModConfig config)
     {
-        var entities = world.Entities?.list;
-        if (entities == null) return;
-
-        foreach (var entity in entities)
+        PerformanceProfiler.StartTimer(PerformanceProfiler.OP_COUNT_DRONES);
+        try
         {
-            if (entity == null || !(entity is EntityDrone drone))
-                continue;
+            var entities = world.Entities?.list;
+            if (entities == null) return;
 
-            try
+            float rangeSquared = config.range > 0f ? config.range * config.range : 0f;
+
+            for (int i = 0; i < entities.Count; i++)
             {
-                // Skip the currently open drone - it's counted via CurrentOpenContainer
-                // (drone storage opens via XUiC_LootContainer which sets CurrentOpenContainer)
-                if (CurrentOpenDrone != null && drone.entityId == CurrentOpenDrone.entityId)
-                    continue;
-                
-                if (config.range > 0f && Vector3.Distance(playerPos, drone.position) >= config.range)
-                    continue;
-                
-                // Only include drones owned by the local player
-                if (!drone.LocalPlayerIsOwner())
+                var entity = entities[i];
+                if (entity == null || !(entity is EntityDrone drone))
                     continue;
 
-                // Count from lootContainer ONLY (not bag - they share the same items array!)
-                // See EntityDrone line 2230: base.lootContainer.items = bag.GetSlots();
-                var lootContainer = drone.lootContainer;
-                if (lootContainer?.items != null)
+                try
                 {
-                    foreach (var stack in lootContainer.items)
+                    // Skip the currently open drone - it's counted via CurrentOpenContainer
+                    // (drone storage opens via XUiC_LootContainer which sets CurrentOpenContainer)
+                    if (CurrentOpenDrone != null && drone.entityId == CurrentOpenDrone.entityId)
+                        continue;
+                    
+                    if (rangeSquared > 0f)
                     {
-                        if (stack?.itemValue != null && !stack.IsEmpty())
-                            AddToCountCache(stack.itemValue.type, stack.count);
+                        float dx = playerPos.x - drone.position.x;
+                        float dy = playerPos.y - drone.position.y;
+                        float dz = playerPos.z - drone.position.z;
+                        if (dx * dx + dy * dy + dz * dz >= rangeSquared)
+                            continue;
+                    }
+                    
+                    // Only include drones owned by the local player
+                    if (!drone.LocalPlayerIsOwner())
+                        continue;
+
+                    // Count from lootContainer ONLY (not bag - they share the same items array!)
+                    // See EntityDrone line 2230: base.lootContainer.items = bag.GetSlots();
+                    var lootContainer = drone.lootContainer;
+                    var items = lootContainer?.items;
+                    if (items != null)
+                    {
+                        for (int j = 0; j < items.Length; j++)
+                        {
+                            var stack = items[j];
+                            if (stack?.itemValue != null && !stack.IsEmpty())
+                                AddToCountCache(stack.itemValue.type, stack.count);
+                        }
                     }
                 }
+                catch (Exception ex)
+                {
+                    ProxiCraft.LogDebug($"Error counting drone items: {ex.Message}");
+                }
             }
-            catch (Exception ex)
-            {
-                ProxiCraft.LogDebug($"Error counting drone items: {ex.Message}");
-            }
+        }
+        finally
+        {
+            PerformanceProfiler.StopTimer(PerformanceProfiler.OP_COUNT_DRONES);
         }
     }
 
@@ -632,43 +711,55 @@ public static class ContainerManager
     /// </summary>
     private static void CountAllDewCollectorItems(World world, Vector3 playerPos, ModConfig config, Vector3i openContainerPos)
     {
-        for (int clusterIdx = 0; clusterIdx < world.ChunkClusters.Count; clusterIdx++)
+        float rangeSquared = config.range > 0f ? config.range * config.range : -1f;
+        
+        int clusterCount = world.ChunkClusters.Count;
+        for (int clusterIdx = 0; clusterIdx < clusterCount; clusterIdx++)
         {
             var cluster = world.ChunkClusters[clusterIdx];
             if (cluster == null) continue;
 
-            var chunks = ((WorldChunkCache)cluster).chunks?.dict?.Values?.ToArray();
-            if (chunks == null) continue;
+            var chunkDict = ((WorldChunkCache)cluster).chunks?.dict;
+            if (chunkDict == null) continue;
 
-            foreach (var chunk in chunks)
+            // Iterate directly to avoid ToArray() allocation
+            foreach (var chunkKvp in chunkDict)
             {
+                var chunk = chunkKvp.Value;
                 if (chunk == null) continue;
 
                 chunk.EnterReadLock();
                 try
                 {
-                    var tileEntityKeys = chunk.tileEntities?.dict?.Keys?.ToArray();
-                    if (tileEntityKeys == null) continue;
+                    var tileEntityDict = chunk.tileEntities?.dict;
+                    if (tileEntityDict == null) continue;
 
-                    foreach (var key in tileEntityKeys)
+                    foreach (var teKvp in tileEntityDict)
                     {
-                        if (!chunk.tileEntities.dict.TryGetValue(key, out var tileEntity))
-                            continue;
-
-                        if (!(tileEntity is TileEntityCollector collector))
+                        var tileEntity = teKvp.Value;
+                        if (tileEntity == null || !(tileEntity is TileEntityCollector collector))
                             continue;
 
                         var worldPos = tileEntity.ToWorldPos();
                         if (openContainerPos != Vector3i.zero && worldPos == openContainerPos)
                             continue;
-                        if (config.range > 0f && Vector3.Distance(playerPos, (Vector3)worldPos) >= config.range)
-                            continue;
+                        
+                        // Range check using squared distance
+                        if (rangeSquared > 0f)
+                        {
+                            float dx = playerPos.x - worldPos.x;
+                            float dy = playerPos.y - worldPos.y;
+                            float dz = playerPos.z - worldPos.z;
+                            if (dx * dx + dy * dy + dz * dz >= rangeSquared)
+                                continue;
+                        }
 
                         var items = collector.items;
                         if (items != null)
                         {
-                            foreach (var stack in items)
+                            for (int i = 0; i < items.Length; i++)
                             {
+                                var stack = items[i];
                                 if (stack?.itemValue != null && !stack.IsEmpty())
                                     AddToCountCache(stack.itemValue.type, stack.count);
                             }
@@ -690,30 +781,33 @@ public static class ContainerManager
     /// </summary>
     private static void CountAllWorkstationOutputItems(World world, Vector3 playerPos, ModConfig config, Vector3i openContainerPos)
     {
-        for (int clusterIdx = 0; clusterIdx < world.ChunkClusters.Count; clusterIdx++)
+        float rangeSquared = config.range > 0f ? config.range * config.range : -1f;
+        
+        int clusterCount = world.ChunkClusters.Count;
+        for (int clusterIdx = 0; clusterIdx < clusterCount; clusterIdx++)
         {
             var cluster = world.ChunkClusters[clusterIdx];
             if (cluster == null) continue;
 
-            var chunks = ((WorldChunkCache)cluster).chunks?.dict?.Values?.ToArray();
-            if (chunks == null) continue;
+            var chunkDict = ((WorldChunkCache)cluster).chunks?.dict;
+            if (chunkDict == null) continue;
 
-            foreach (var chunk in chunks)
+            // Iterate directly to avoid ToArray() allocation
+            foreach (var chunkKvp in chunkDict)
             {
+                var chunk = chunkKvp.Value;
                 if (chunk == null) continue;
 
                 chunk.EnterReadLock();
                 try
                 {
-                    var tileEntityKeys = chunk.tileEntities?.dict?.Keys?.ToArray();
-                    if (tileEntityKeys == null) continue;
+                    var tileEntityDict = chunk.tileEntities?.dict;
+                    if (tileEntityDict == null) continue;
 
-                    foreach (var key in tileEntityKeys)
+                    foreach (var teKvp in tileEntityDict)
                     {
-                        if (!chunk.tileEntities.dict.TryGetValue(key, out var tileEntity))
-                            continue;
-
-                        if (!(tileEntity is TileEntityWorkstation workstation))
+                        var tileEntity = teKvp.Value;
+                        if (tileEntity == null || !(tileEntity is TileEntityWorkstation workstation))
                             continue;
 
                         // Skip the currently open workstation - already counted via CurrentOpenWorkstation
@@ -723,14 +817,23 @@ public static class ContainerManager
                         var worldPos = tileEntity.ToWorldPos();
                         if (openContainerPos != Vector3i.zero && worldPos == openContainerPos)
                             continue;
-                        if (config.range > 0f && Vector3.Distance(playerPos, (Vector3)worldPos) >= config.range)
-                            continue;
+                        
+                        // Range check using squared distance
+                        if (rangeSquared > 0f)
+                        {
+                            float dx = playerPos.x - worldPos.x;
+                            float dy = playerPos.y - worldPos.y;
+                            float dz = playerPos.z - worldPos.z;
+                            if (dx * dx + dy * dy + dz * dz >= rangeSquared)
+                                continue;
+                        }
 
                         var output = workstation.Output;
                         if (output != null)
                         {
-                            foreach (var stack in output)
+                            for (int i = 0; i < output.Length; i++)
                             {
+                                var stack = output[i];
                                 if (stack?.itemValue != null && !stack.IsEmpty())
                                     AddToCountCache(stack.itemValue.type, stack.count);
                             }
@@ -916,40 +1019,48 @@ public static class ContainerManager
     /// </summary>
     private static void RefreshStorages(ModConfig config)
     {
-        // Get player position
-        var world = GameManager.Instance?.World;
-        var player = world?.GetPrimaryPlayer();
-        
-        if (player == null)
-        {
-            _currentStorageDict.Clear();
-            return;
-        }
-
-        Vector3 playerPos = player.position;
-        float currentTime = Time.time;
-
-        // Check if we should skip the scan (caching)
-        // Always rescan if force flag is set or if a container is currently open by local player
-        bool containerOpenByPlayer = IsAnyContainerOpenByLocalPlayer();
-        bool shouldRescan = 
-            _forceCacheRefresh ||
-            containerOpenByPlayer ||  // Always refresh when player has a container open
-            currentTime - _lastScanTime > SCAN_COOLDOWN ||
-            Vector3.Distance(playerPos, _lastScanPosition) > POSITION_CHANGE_THRESHOLD;
-
-        if (!shouldRescan && _currentStorageDict.Count > 0)
-            return;
-
-        _forceCacheRefresh = false;
-        _lastScanTime = currentTime;
-        _lastScanPosition = playerPos;
-
-        _currentStorageDict.Clear();
-        _knownStorageDict.Clear();
-
+        PerformanceProfiler.StartTimer(PerformanceProfiler.OP_REFRESH_STORAGES);
         try
         {
+            // Get player position
+            var world = GameManager.Instance?.World;
+            var player = world?.GetPrimaryPlayer();
+            
+            if (player == null)
+            {
+                _currentStorageDict.Clear();
+                return;
+            }
+
+            Vector3 playerPos = player.position;
+            float currentTime = Time.time;
+
+            // Check if we should skip the scan (caching)
+            // Always rescan if force flag is set or if a container is currently open by local player
+            bool containerOpenByPlayer = IsAnyContainerOpenByLocalPlayer();
+            
+            // Use squared distance for position change check (avoids sqrt)
+            float dx = playerPos.x - _lastScanPosition.x;
+            float dy = playerPos.y - _lastScanPosition.y;
+            float dz = playerPos.z - _lastScanPosition.z;
+            float distSquared = dx * dx + dy * dy + dz * dz;
+            
+            bool shouldRescan = 
+                _forceCacheRefresh ||
+                containerOpenByPlayer ||  // Always refresh when player has a container open
+                currentTime - _lastScanTime > SCAN_COOLDOWN ||
+                distSquared > POSITION_CHANGE_THRESHOLD * POSITION_CHANGE_THRESHOLD;
+
+            if (!shouldRescan && _currentStorageDict.Count > 0)
+                return;
+
+            _forceCacheRefresh = false;
+            _lastScanTime = currentTime;
+            _lastScanPosition = playerPos;
+
+            _currentStorageDict.Clear();
+            _knownStorageDict.Clear();
+
             // Scan entities (vehicles, drones) from the world entity list
             ScanWorldEntities(world, playerPos, config);
 
@@ -959,11 +1070,14 @@ public static class ContainerManager
                 var cluster = world.ChunkClusters[clusterIdx];
                 if (cluster == null) continue;
 
-                var chunks = ((WorldChunkCache)cluster).chunks?.dict?.Values?.ToArray();
-                if (chunks == null) continue;
+                var chunkCache = cluster as WorldChunkCache;
+                var chunkDict = chunkCache?.chunks?.dict;
+                if (chunkDict == null) continue;
 
-                foreach (var chunk in chunks)
+                // Iterate dictionary directly without ToArray() allocation
+                foreach (var kvp in chunkDict)
                 {
+                    var chunk = kvp.Value;
                     if (chunk == null) continue;
 
                     chunk.EnterReadLock();
@@ -983,6 +1097,10 @@ public static class ContainerManager
         {
             ProxiCraft.LogError($"Error refreshing storages: {ex.Message}");
         }
+        finally
+        {
+            PerformanceProfiler.StopTimer(PerformanceProfiler.OP_REFRESH_STORAGES);
+        }
     }
 
     /// <summary>
@@ -993,15 +1111,24 @@ public static class ContainerManager
         var entities = world.Entities?.list;
         if (entities == null) return;
 
-        foreach (var entity in entities)
+        float rangeSquared = config.range > 0f ? config.range * config.range : 0f;
+
+        for (int i = 0; i < entities.Count; i++)
         {
+            var entity = entities[i];
             if (entity == null) continue;
 
             try
             {
-                // Range check first for performance
-                if (config.range > 0f && Vector3.Distance(playerPos, entity.position) >= config.range)
-                    continue;
+                // Range check first for performance (using squared distance to avoid sqrt)
+                if (rangeSquared > 0f)
+                {
+                    float dx = playerPos.x - entity.position.x;
+                    float dy = playerPos.y - entity.position.y;
+                    float dz = playerPos.z - entity.position.z;
+                    if (dx * dx + dy * dy + dz * dz >= rangeSquared)
+                        continue;
+                }
 
                 // Process vehicles
                 if (config.pullFromVehicles && entity is EntityVehicle vehicle)
