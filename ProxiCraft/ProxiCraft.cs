@@ -2604,6 +2604,84 @@ public class ProxiCraft : IModApi
         }
     }
 
+    /// <summary>
+    /// Patch Bag.DecItem to invalidate cache and refresh HUD when ammo is consumed from bag.
+    /// This handles reload operations and any other bag item removal.
+    /// </summary>
+    [HarmonyPatch(typeof(Bag), nameof(Bag.DecItem))]
+    [HarmonyPriority(Priority.Low)]
+    private static class Bag_DecItem_Patch
+    {
+        public static void Postfix()
+        {
+            if (!Config?.modEnabled == true)
+                return;
+
+            // Invalidate cache since bag contents changed
+            ContainerManager.InvalidateCache();
+            
+            // Mark HUD dirty to refresh ammo display
+            MarkHudAmmoDirty();
+        }
+    }
+
+    /// <summary>
+    /// Patch Inventory.DecItem to invalidate cache and refresh HUD when ammo is consumed from toolbelt.
+    /// </summary>
+    [HarmonyPatch(typeof(Inventory), nameof(Inventory.DecItem))]
+    [HarmonyPriority(Priority.Low)]
+    private static class Inventory_DecItem_Patch
+    {
+        public static void Postfix()
+        {
+            if (!Config?.modEnabled == true)
+                return;
+
+            // Invalidate cache since inventory contents changed
+            ContainerManager.InvalidateCache();
+            
+            // Mark HUD dirty to refresh ammo display
+            MarkHudAmmoDirty();
+        }
+    }
+
+    /// <summary>
+    /// Patch Bag.AddItem to invalidate cache when items are added to bag.
+    /// This ensures counts are accurate after picking up items.
+    /// </summary>
+    [HarmonyPatch(typeof(Bag), nameof(Bag.AddItem))]
+    [HarmonyPriority(Priority.Low)]
+    private static class Bag_AddItem_Patch
+    {
+        public static void Postfix()
+        {
+            if (!Config?.modEnabled == true)
+                return;
+
+            ContainerManager.InvalidateCache();
+            MarkHudAmmoDirty();
+            RefreshRecipeTracker();
+        }
+    }
+
+    /// <summary>
+    /// Patch Inventory.AddItem to invalidate cache when items are added to toolbelt.
+    /// </summary>
+    [HarmonyPatch(typeof(Inventory), nameof(Inventory.AddItem))]
+    [HarmonyPriority(Priority.Low)]
+    private static class Inventory_AddItem_Patch
+    {
+        public static void Postfix()
+        {
+            if (!Config?.modEnabled == true)
+                return;
+
+            ContainerManager.InvalidateCache();
+            MarkHudAmmoDirty();
+            RefreshRecipeTracker();
+        }
+    }
+
     #endregion
 
     #region Harmony Patches - Slot Lock Change Handler
