@@ -85,8 +85,12 @@ public class ModConfig
     /// <summary>Enable real-time recipe tracker updates when container items change</summary>
     public bool enableRecipeTrackerUpdates = true;
 
-    /// <summary>Allow selling items from nearby containers to traders</summary>
-    public bool enableTraderSelling = true;
+    /// <summary>
+    /// [NOT IMPLEMENTED] Allow selling items from nearby containers to traders.
+    /// This feature would require adding virtual item slots to the trader UI,
+    /// which is a significant undertaking. Currently has no effect.
+    /// </summary>
+    public bool enableTraderSelling = false;
 
     /// <summary>
     /// Respect user-locked slots in containers (locked slots are excluded from all operations).
