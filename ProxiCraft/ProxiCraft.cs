@@ -56,7 +56,7 @@ public class ProxiCraft : IModApi
 {
     // Mod metadata
     public const string MOD_NAME = "ProxiCraft";
-    public const string MOD_VERSION = "1.1.0";
+    public const string MOD_VERSION = "1.2.0";
     
     // Static references
     private static ProxiCraft _instance;

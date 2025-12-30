@@ -400,6 +400,39 @@ Outputs:
 - `Release/ProxiCraft/` - The mod folder
 - `Release/ProxiCraft.zip` - Distribution package
 
+## Changelog
+
+### v1.2.0 - Features & Bug Fixes
+**New Features:**
+- **New**: HUD ammo counter - shows container ammo in weapon stat bar
+- **New**: Locked slot respect - items in user-locked container slots excluded from all operations
+
+**Bug Fixes:**
+- **Fixed**: Radial menu reload - ammo greyed out when only in nearby containers *(reported by falkon311)*
+- **Fixed**: R-key reload blocked when ammo only in containers *(reported by falkon311)*
+- **Fixed**: Block upgrades not consuming materials from nearby containers *(reported by falkon311)*
+- **Fixed**: Workstation output items counted but not consumed - crafting exploit *(reported by Kaizlin)*
+- **Fixed**: "Take Like" button taking all container contents instead of matching items *(reported by Kaizlin)*
+
+### v1.1.0 - Expanded Storage Sources
+- Vehicle storage support - minibike, motorcycle, 4x4, gyrocopter
+- Drone storage support - use items from drone cargo
+- Dew collector support - water available for crafting
+- Workstation output slots - forge, workbench, campfire, chemistry station
+- Recipe tracker real-time updates from containers
+- Performance profiler - `pc perf` commands for diagnostics
+- Container cache performance optimizations
+
+### v1.0.0 - Initial Public Release
+- Core crafting from containers
+- Weapon reload from containers
+- Vehicle/generator refuel from containers
+- Block repair from containers
+- Lockpicking and item repair from containers
+- Challenge tracker integration
+- Startup health check system
+- Console diagnostics (`pc` commands)
+
 ## License
 
 MIT License - See [LICENSE](LICENSE) for details.

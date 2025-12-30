@@ -2,7 +2,7 @@
   "_comment": "ProxiCraft Configuration - See README for full documentation",
 
   "modEnabled": true,
-  "isDebug": true,
+  "isDebug": false,
   "verboseHealthCheck": false,
 
   "_rangeNote1": "Range in blocks. 15=same room, 30=building, 50=compound.",

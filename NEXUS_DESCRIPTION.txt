@@ -243,24 +243,41 @@ If you find a mod conflict, please report it so we can update this list.
 
 [size=4][b]Changelog[/b][/size]
 
+[b]v1.2.0 - Features & Bug Fixes[/b]
+
+[u]New Features:[/u]
+[list]
+[*][b]HUD Ammo Counter[/b] - Shows container ammo in the weapon stat bar
+[*][b]Locked Slot Respect[/b] - Items in user-locked container slots are excluded from all operations
+[/list]
+
+[u]Bug Fixes:[/u]
+[list]
+[*][b]Fixed[/b]: Radial menu reload - ammo greyed out when only in nearby containers [i](reported by falkon311)[/i]
+[*][b]Fixed[/b]: R-key reload blocked when ammo only in containers [i](reported by falkon311)[/i]
+[*][b]Fixed[/b]: Block upgrades not consuming materials from nearby containers [i](reported by falkon311)[/i]
+[*][b]Fixed[/b]: Workstation output items counted but not consumed - crafting exploit [i](reported by Kaizlin)[/i]
+[*][b]Fixed[/b]: "Take Like" button taking all container contents instead of matching items [i](reported by Kaizlin)[/i]
+[/list]
+
 [b]v1.1.0 - Expanded Storage Sources[/b]
 [list]
 [*][b]Vehicle Storage[/b] - Pull items from minibike, motorcycle, 4x4, and gyrocopter storage
 [*][b]Drone Storage[/b] - Use items stored in your drone's cargo compartment
 [*][b]Dew Collectors[/b] - Water from dew collectors now available for crafting/recipes
 [*][b]Workstation Outputs[/b] - Finished items in forge, workbench, campfire, and chemistry station output slots
+[*][b]Recipe Tracker Updates[/b] - Real-time ingredient counts from containers
 [*][b]Performance Profiler[/b] - New `pc perf` commands to diagnose performance issues
-[*][b]Performance Optimizations[/b] - Reduced CPU overhead with optimized distance checks and zero-allocation scanning
-[*][b]Auto-save Reports[/b] - `pc perf report` now saves to perf_report.txt for easy sharing
+[*][b]Performance Optimizations[/b] - Reduced CPU overhead with optimized distance checks
 [/list]
 
-[b]v1.0.0 - Initial Release[/b]
+[b]v1.0.0 - Initial Public Release[/b]
 [list]
-[*]Craft from nearby containers
-[*]Reload weapons from container ammo
-[*]Refuel vehicles and generators
-[*]Repair and upgrade blocks
-[*]Buy from traders using stored dukes
+[*]Core crafting from nearby containers
+[*]Weapon reload from container ammo
+[*]Vehicle and generator refuel from containers
+[*]Block repair from containers
+[*]Trader purchases using stored dukes
 [*]Lockpicking with stored lockpicks
 [*]Painting with stored paint
 [*]Item repair with stored repair kits

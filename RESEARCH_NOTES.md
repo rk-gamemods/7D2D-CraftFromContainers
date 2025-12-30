@@ -453,3 +453,107 @@ GetItemCount: Container at X, Y, Z has N itemName
 StatusText_Patch: Item=X, actualInv=Y, containers=Z, totalPossession=W
 CheckComplete_Patch: Item=X, actualInv=Y, containers=Z
 ```
+
+---
+
+## v1.2.0 Bug Fixes - January 2025
+
+### Bug #1: Radial Menu Reload - Ammo Greyed Out
+**Reported by:** falkon311 (Nexus Mods)  
+**Symptom:** Radial menu reload option greyed out when ammo only in nearby containers  
+**Root Cause:** Two issues:
+1. `ItemActionRanged.CanReload()` wasn't patched - only `ItemActionLauncher.CanReload()` was
+2. Radial menu uses `GetItemCount(int itemId)` overload, but we only patched `GetItemCount(string itemName)`
+
+**Fix:**
+1. Added `ItemActionRanged_CanReload_Patch` - postfix that returns true if containers have ammo
+2. Added `GetItemCount(int)` overload in `ContainerManager` that delegates to `GetItemCount(string)`
+3. Added `XUiM_PlayerInventory_GetItemCountById_Patch` for the int-based overload
+
+### Bug #2: Block Upgrades Not Consuming Materials
+**Reported by:** falkon311 (Nexus Mods)  
+**Symptom:** Block upgrades showed materials available but didn't consume them from containers  
+**Root Cause:** `ItemActionRepair.removeRequiredResource()` only removes from backpack/toolbelt
+
+**Fix:**
+1. Added `ItemActionRepair_RemoveRequiredResource_Patch` - prefix that removes from containers first
+2. Uses `ContainerManager.RemoveItems()` with the required count
+3. Returns `false` to skip vanilla removal if container had enough
+
+### Bug #3: Workstation Output "Free Crafting" Exploit
+**Reported by:** Kaizlin (Nexus Mods)  
+**Symptom:** Items in workstation output slots counted as available but never consumed - infinite crafting  
+**Root Cause:** Workstation UI maintains its own copy of slots. When `syncTEfromUI()` runs on close, it OVERWRITES the TileEntity with UI data. Our removal from TileEntity.items was being overwritten.
+
+**Fix:**
+1. Added `RemoveFromWorkstationOutputUI()` method that modifies both:
+   - The UI slot (`XUiC_ItemStackGrid.itemControllers[].ItemStack`)
+   - The TileEntity (`workstation.Output[slot]`)
+2. Added `GetCurrentWorkstationOutputGrid()` helper to find the open workstation UI
+3. Modified `RemoveItems()` to call `RemoveFromWorkstationOutputUI()` for workstation sources
+4. Key: Workstation outputs use `y+10000` offset in our container dictionary to distinguish them
+
+**Key Lesson:** Workstation UIs have a dual-buffer architecture. Reading from TileEntity works, but WRITING must go to BOTH the UI and the TileEntity or changes get lost on close.
+
+### Bug #4: "Take Like" Button Taking All Items
+**Reported by:** Kaizlin (Nexus Mods)  
+**Symptom:** "Take Like" button (take all matching items from container) was taking ALL items  
+**Root Cause:** `ItemStack.HasItem()` was patched to return true if containers have the item, but "Take Like" uses this to filter items
+
+**Fix:**
+1. Added `HasItem_Patch` - prefix that detects when called from `TakeItemLike_OnPress`
+2. Uses stack trace detection to identify the calling context
+3. Returns vanilla behavior (inventory-only check) when called from "Take Like"
+
+**Implementation Details:**
+```csharp
+[HarmonyPatch(typeof(ItemStack), "HasItem")]
+private static class HasItem_Patch
+{
+    public static bool Prefix(ItemStack __instance, ref bool __result)
+    {
+        // Detect TakeItemLike context via stack trace
+        var stackTrace = new StackTrace();
+        foreach (var frame in stackTrace.GetFrames())
+        {
+            if (frame.GetMethod()?.Name == "TakeItemLike_OnPress")
+            {
+                // Return vanilla behavior
+                __result = __instance.count > 0 && !__instance.IsEmpty();
+                return false; // Skip original + our postfix
+            }
+        }
+        return true; // Continue to original + our postfix
+    }
+}
+```
+
+---
+
+## Technical Lessons from v1.2.0
+
+### 1. UI vs TileEntity Dual-Buffer Pattern
+Workstations (and likely other UIs) maintain their own copy of slot data:
+- **Read path:** TileEntity.items → Safe to read for counting
+- **Write path:** Must modify BOTH UI slots AND TileEntity slots
+- **Sync timing:** UI overwrites TileEntity on window close
+
+### 2. Method Overload Coverage
+When patching inventory methods, check for ALL overloads:
+- `GetItemCount(string itemName)` - Used by crafting UI
+- `GetItemCount(int itemId)` - Used by radial menu, some game systems
+- `GetItemCount(ItemValue itemValue)` - Used by other systems
+
+### 3. Context-Aware Patching
+Sometimes you need to behave differently based on who's calling:
+- Stack trace inspection for call context detection
+- `__state` parameter for prefix→postfix data passing
+- Caching caller info in thread-local storage
+
+### 4. Repair Actions Need Removal Patches
+`ItemActionRepair.removeRequiredResource()` handles material consumption for:
+- Block repairs
+- Block upgrades
+- Potentially other repair-like actions
+
+If you want containers as a material source, you MUST patch the removal method too.

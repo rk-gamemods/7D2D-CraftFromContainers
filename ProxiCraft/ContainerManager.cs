@@ -221,6 +221,99 @@ public static class ContainerManager
     }
 
     /// <summary>
+    /// Gets the workstation output grid UI if a workstation is currently open.
+    /// This is needed because modifying the TileEntity directly doesn't work - 
+    /// the UI has its own copy of the slots that gets synced back to TileEntity on close.
+    /// </summary>
+    private static XUiC_WorkstationOutputGrid GetCurrentWorkstationOutputGrid()
+    {
+        try
+        {
+            var player = GameManager.Instance?.World?.GetPrimaryPlayer();
+            if (player == null) return null;
+            
+            var xui = LocalPlayerUI.GetUIForPlayer(player)?.xui;
+            return xui?.currentWorkstationOutputGrid;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Removes items from the workstation output UI slots directly.
+    /// Returns the number of items removed.
+    /// 
+    /// CRITICAL: We MUST modify the UI slots, not the TileEntity.Output directly!
+    /// When the workstation is open, the UI has its own copy of the slots.
+    /// On close, syncTEfromUI() copies UI slots back to TileEntity, overwriting any
+    /// direct TileEntity modifications we made.
+    /// </summary>
+    private static int RemoveFromWorkstationOutputUI(ItemValue item, int count, out bool handled)
+    {
+        handled = false;
+        int removed = 0;
+        
+        try
+        {
+            var outputGrid = GetCurrentWorkstationOutputGrid();
+            if (outputGrid == null) return 0;
+            
+            var itemControllers = outputGrid.GetItemStackControllers();
+            if (itemControllers == null) return 0;
+            
+            int remaining = count;
+            
+            for (int i = 0; i < itemControllers.Length && remaining > 0; i++)
+            {
+                var controller = itemControllers[i];
+                if (controller == null) continue;
+                
+                var stack = controller.ItemStack;
+                if (stack == null || stack.IsEmpty()) continue;
+                if (stack.itemValue?.type != item.type) continue;
+                
+                int toRemove = Math.Min(remaining, stack.count);
+                int countBefore = stack.count;
+                
+                ProxiCraft.LogDebug($"Removing {toRemove}/{remaining} {item.ItemClass?.GetItemName()} from workstation output UI slot {i} (count before: {countBefore})");
+                
+                if (stack.count <= toRemove)
+                {
+                    // Clear the slot completely
+                    controller.ItemStack = ItemStack.Empty.Clone();
+                    ProxiCraft.LogDebug($"  UI Slot {i} cleared");
+                }
+                else
+                {
+                    // Reduce the count - need to create new ItemStack since count might be readonly
+                    var newStack = new ItemStack(stack.itemValue.Clone(), stack.count - toRemove);
+                    controller.ItemStack = newStack;
+                    ProxiCraft.LogDebug($"  UI Slot {i} count: {countBefore} -> {newStack.count}");
+                }
+                
+                remaining -= toRemove;
+                removed += toRemove;
+            }
+            
+            if (removed > 0)
+            {
+                // Mark the grid as dirty to trigger UI refresh
+                outputGrid.IsDirty = true;
+                handled = true;
+                ProxiCraft.LogDebug($"Removed {removed} items from workstation output UI");
+            }
+        }
+        catch (Exception ex)
+        {
+            ProxiCraft.LogWarning($"Error removing from workstation output UI: {ex.Message}");
+        }
+        
+        return removed;
+    }
+
+    /// <summary>
     /// Clears all cached storage references. Call when starting a new game.
     /// </summary>
     public static void ClearCache()
@@ -1281,64 +1374,24 @@ public static class ContainerManager
             RefreshStorages(config);
             
             // ====================================================================================
-            // STEP 1: Handle CurrentOpenWorkstation.Output FIRST
-            // ====================================================================================
             // When a workstation is open, we need to remove from its live Output reference
             // before iterating the storage dict. This ensures the UI sees the removal immediately.
             // We track this with a flag to skip the same workstation in the dict iteration.
             //
-            // NOTE: This may be redundant with vanilla's UpdateBackend refresh, but we call it
-            // explicitly to ensure UI updates. If profiling shows this is a performance issue,
-            // we can revisit. See plan discussion in chat history.
+            // CRITICAL: We must modify the UI slots directly, NOT the TileEntity!
+            // The UI has its own copy of slots. On close, syncTEfromUI() copies UI -> TileEntity,
+            // which would overwrite any direct TileEntity modifications.
             // ====================================================================================
             if (config.pullFromWorkstationOutputs && CurrentOpenWorkstation != null && remaining > 0)
             {
-                var output = CurrentOpenWorkstation.Output;
-                if (output != null)
+                // Check range to the open workstation
+                var workstationPos = CurrentOpenWorkstation.ToWorldPos();
+                if (IsInRange(config, workstationPos))
                 {
-                    // Check range to the open workstation
-                    var workstationPos = CurrentOpenWorkstation.ToWorldPos();
-                    if (IsInRange(config, workstationPos))
-                    {
-                        for (int i = 0; i < output.Length && remaining > 0; i++)
-                        {
-                            if (output[i]?.itemValue?.type != item.type)
-                                continue;
-
-                            int toRemove = Math.Min(remaining, output[i].count);
-
-                            ProxiCraft.LogDebug($"Removing {toRemove}/{remaining} {item.ItemClass?.GetItemName() ?? "unknown"} from open workstation output");
-
-                            // Modify data FIRST (before any events/UI updates)
-                            if (output[i].count <= toRemove)
-                            {
-                                output[i].Clear();
-                            }
-                            else
-                            {
-                                output[i].count -= toRemove;
-                            }
-
-                            remaining -= toRemove;
-                            removed += toRemove;
-                        }
-
-                        // If we removed anything, sync and refresh UI
-                        if (removed > 0)
-                        {
-                            // CRITICAL: Reassign the Output property to trigger the setter
-                            // The setter does: output = ItemStack.Clone(value); setModified();
-                            // Just calling SetModified() isn't enough - we need the property assignment
-                            // to properly sync the changes
-                            CurrentOpenWorkstation.Output = output;
-                            
-                            // Trigger UI refresh - find the output grid and update it
-                            // This may be redundant with vanilla's natural refresh, but ensures correctness
-                            TriggerWorkstationOutputRefresh();
-                            
-                            handledOpenWorkstation = true;
-                        }
-                    }
+                    // Use the new UI-based removal
+                    int uiRemoved = RemoveFromWorkstationOutputUI(item, remaining, out handledOpenWorkstation);
+                    remaining -= uiRemoved;
+                    removed += uiRemoved;
                 }
             }
 
