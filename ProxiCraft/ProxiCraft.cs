@@ -100,6 +100,9 @@ public class ProxiCraft : IModApi
             // Run startup health check to validate all features
             StartupHealthCheck.RunHealthCheck(Config);
 
+            // Register for player spawn event to pre-warm cache
+            ModEvents.PlayerSpawnedInWorld.RegisterHandler(OnPlayerSpawnedInWorld);
+
             // Report any compatibility issues
             if (ModCompatibility.HasCriticalConflicts())
             {
@@ -121,6 +124,43 @@ public class ProxiCraft : IModApi
         {
             Debug.LogError($"[ProxiCraft] Failed to apply Harmony patches: {ex.Message}");
             Debug.LogError($"[ProxiCraft] {ex.StackTrace}");
+        }
+    }
+    
+    /// <summary>
+    /// Called when player spawns in world - triggers background cache pre-warming.
+    /// </summary>
+    private static void OnPlayerSpawnedInWorld(ref ModEvents.SPlayerSpawnedInWorldData data)
+    {
+        // Only pre-warm for local player
+        if (!data.IsLocalPlayer)
+            return;
+        
+        // Schedule cache pre-warm after a short delay (let the world fully load)
+        ThreadManager.StartCoroutine(PreWarmCacheDelayed());
+    }
+    
+    /// <summary>
+    /// Pre-warms the container cache after a short delay post-spawn.
+    /// This eliminates the lag spike on first container/crafting access.
+    /// </summary>
+    private static System.Collections.IEnumerator PreWarmCacheDelayed()
+    {
+        // Wait 2 seconds for world to fully load
+        yield return new WaitForSeconds(2f);
+        
+        if (Config?.modEnabled != true)
+            yield break;
+        
+        try
+        {
+            LogDebug("Pre-warming container cache...");
+            ContainerManager.PreWarmCache(Config);
+            LogDebug("Container cache pre-warmed");
+        }
+        catch (Exception ex)
+        {
+            LogWarning($"Cache pre-warm failed: {ex.Message}");
         }
     }
     
@@ -264,7 +304,8 @@ public class ProxiCraft : IModApi
             {
                 ContainerManager.InvalidateCache();
                 ContainerManager.ClearCache();
-                Log($"Range changed from {oldRange} to {Config.range} - cache cleared");
+                ContainerManager.ResetScanMethodCache(); // Recalculate optimal scan method
+                Log($"Range changed from {oldRange} to {Config.range} - cache cleared, scan method will be recalculated");
             }
 
             Log("Configuration reloaded successfully");
@@ -531,7 +572,7 @@ public class ProxiCraft : IModApi
             if (recipeTracker != null)
             {
                 recipeTracker.IsDirty = true;
-                FileLog("[REFRESH] Marked recipe tracker as dirty");
+                // Don't log every refresh - too spammy
             }
         }
         catch (Exception ex)
@@ -830,6 +871,40 @@ public class ProxiCraft : IModApi
     #region Harmony Patches - Ingredient Display
     
     /// <summary>
+    /// Prefix patch on HasItem(ItemValue) to return VANILLA inventory-only result.
+    /// 
+    /// This fixes the "Take Like" button issue where our GetItemCount patch makes
+    /// the game think the player "has" every item type that exists in nearby containers,
+    /// causing "Take Like" to take ALL items instead of just matching ones.
+    /// 
+    /// HasItem(ItemValue) is used by the UI for "do you have this item type?" checks,
+    /// NOT for crafting quantity checks. By returning vanilla result, we preserve
+    /// correct "Take Like" behavior while our GetItemCount patch still works for crafting.
+    /// </summary>
+    [HarmonyPatch(typeof(XUiM_PlayerInventory), nameof(XUiM_PlayerInventory.HasItem), new Type[] { typeof(ItemValue) })]
+    [HarmonyPriority(Priority.High)] // Run before other patches
+    private static class XUiM_PlayerInventory_HasItem_ItemValue_Patch
+    {
+        public static bool Prefix(XUiM_PlayerInventory __instance, ref bool __result, ItemValue _item)
+        {
+            // Return vanilla inventory-only check, bypassing our GetItemCount postfix
+            // This preserves correct "Take Like" button behavior
+            try
+            {
+                // Check backpack and toolbelt only (vanilla behavior)
+                __result = __instance.backpack.GetItemCount(_item) > 0 || 
+                           __instance.toolbelt.GetItemCount(_item) > 0;
+                return false; // Skip original method (and any postfixes that might use GetItemCount)
+            }
+            catch
+            {
+                // On error, let original method run
+                return true;
+            }
+        }
+    }
+
+    /// <summary>
     /// DIRECT Postfix patch on XUiM_PlayerInventory.GetItemCount
     /// This is the most reliable way to add container counts to ingredient displays.
     /// </summary>
@@ -1010,6 +1085,8 @@ public class ProxiCraft : IModApi
     /// 
     /// LOGIC FIX: We track inventory counts BEFORE removal in Prefix, then calculate
     /// how much still needs to come from containers in Postfix.
+    /// 
+    /// CRITICAL: We must get RAW inventory counts (not patched GetItemCount which includes containers)
     /// </summary>
     [HarmonyPatch(typeof(XUiM_PlayerInventory), nameof(XUiM_PlayerInventory.RemoveItems))]
     [HarmonyPriority(Priority.Low)]
@@ -1030,7 +1107,8 @@ public class ProxiCraft : IModApi
             _pendingContainerRemovals = _itemStacks;
             _pendingMultiplier = _multiplier;
             
-            // Track inventory counts BEFORE removal so we can calculate deficit correctly
+            // Track RAW inventory counts BEFORE removal (NOT using patched GetItemCount!)
+            // We need to directly query bag + toolbelt to get the real inventory count
             _inventoryCountsBefore.Clear();
             foreach (var item in _itemStacks)
             {
@@ -1040,7 +1118,12 @@ public class ProxiCraft : IModApi
                 int itemType = item.itemValue.type;
                 if (!_inventoryCountsBefore.ContainsKey(itemType))
                 {
-                    _inventoryCountsBefore[itemType] = __instance.GetItemCount(item.itemValue);
+                    // Get RAW counts from bag and toolbelt directly, bypassing our patch
+                    int bagCount = __instance.Backpack?.GetItemCount(item.itemValue) ?? 0;
+                    int toolbeltCount = __instance.Toolbelt?.GetItemCount(item.itemValue) ?? 0;
+                    int rawInventoryCount = bagCount + toolbeltCount;
+                    _inventoryCountsBefore[itemType] = rawInventoryCount;
+                    FileLog($"[REMOVEITEMS] Prefix: {item.itemValue.ItemClass?.GetItemName()} rawInv={rawInventoryCount} (bag={bagCount}, toolbelt={toolbeltCount}), need={item.count * _multiplier}");
                 }
             }
         }
@@ -1069,7 +1152,7 @@ public class ProxiCraft : IModApi
                     int neededTotal = required.count * _pendingMultiplier;
                     int itemType = required.itemValue.type;
                     
-                    // Get how much inventory HAD before removal
+                    // Get how much inventory HAD before removal (RAW count, not patched)
                     int inventoryHadBefore = _inventoryCountsBefore.TryGetValue(itemType, out int count) ? count : 0;
                     
                     // Calculate how much inventory could satisfy
@@ -1078,16 +1161,20 @@ public class ProxiCraft : IModApi
                     // The rest needs to come from containers
                     int fromContainers = neededTotal - inventorySatisfied;
                     
+                    FileLog($"[REMOVEITEMS] Postfix: {required.itemValue.ItemClass?.GetItemName()} neededTotal={neededTotal}, inventoryHad={inventoryHadBefore}, fromContainers={fromContainers}");
+                    
                     if (fromContainers > 0)
                     {
                         int removed = ContainerManager.RemoveItems(Config, required.itemValue, fromContainers);
                         LogDebug($"Removed {removed}/{fromContainers} {required.itemValue?.ItemClass?.GetItemName()} from containers (had {inventoryHadBefore} in inventory, needed {neededTotal})");
+                        FileLog($"[REMOVEITEMS] Removed {removed} from containers");
                     }
                 }
             }
             catch (Exception ex)
             {
                 LogWarning($"Error in RemoveItems Postfix: {ex.Message}");
+                FileLog($"[REMOVEITEMS] ERROR: {ex.Message}");
             }
             finally
             {
@@ -1362,117 +1449,18 @@ public class ProxiCraft : IModApi
     }
 
     // ====================================================================================
-    // TRADER SELLING SUPPORT
+    // TRADER SELLING SUPPORT - REMOVED
     // ====================================================================================
-    // Allows selling items from nearby containers to traders.
-    // Uses the "pull to inventory" approach:
-    // 1. When selling more than the player has in the UI slot, pull from containers first
-    // 2. The sell operation then proceeds normally with the combined items
+    // This feature was removed due to item duplication bugs that could not be fully 
+    // mitigated. See TRADER_SELLING_POSTMORTEM.md for full technical details.
+    //
+    // SUMMARY: We had to replicate ~60% of the game's selling validation logic to
+    // determine if a sale would succeed BEFORE adding items to the player's slot.
+    // Any mismatch between our checks and vanilla's checks caused item duplication.
+    //
+    // The "buy from trader" feature (paying with dukes from containers) remains
+    // functional because it has much simpler failure cases.
     // ====================================================================================
-
-    /// <summary>
-    /// Patch ItemActionEntrySell.OnActivated to pull items from containers before selling.
-    /// Uses POSTFIX to add container items to the total available for selling.
-    /// </summary>
-    [HarmonyPatch(typeof(ItemActionEntrySell), "OnActivated")]
-    [HarmonyPriority(Priority.High)] // Run before vanilla to have items ready
-    private static class ItemActionEntrySell_OnActivated_Patch
-    {
-        public static void Prefix(ItemActionEntrySell __instance)
-        {
-            if (!Config?.modEnabled == true || !Config?.enableTraderSelling == true)
-                return;
-
-            try
-            {
-                // Get the ItemController field from BaseItemActionEntry
-                var itemControllerField = typeof(BaseItemActionEntry).GetField("ItemController",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                var itemController = itemControllerField?.GetValue(__instance) as XUiController;
-
-                var xUiC_ItemStack = itemController as XUiC_ItemStack;
-                if (xUiC_ItemStack?.ItemStack == null || xUiC_ItemStack.ItemStack.IsEmpty())
-                    return;
-
-                // Get the InfoWindow field to access BuySellCounter
-                var infoWindow = xUiC_ItemStack.InfoWindow;
-                if (infoWindow?.BuySellCounter == null)
-                    return;
-
-                int requestedCount = infoWindow.BuySellCounter.Count;
-                int slotCount = xUiC_ItemStack.ItemStack.count;
-
-                LogDebug($"Trader sell: Requested {requestedCount}, slot has {slotCount}");
-
-                // If selling more than in slot, try to pull from containers first
-                if (requestedCount > slotCount)
-                {
-                    int needed = requestedCount - slotCount;
-
-                    // Pull items from containers into the item stack
-                    int pulled = ContainerManager.RemoveItems(Config, xUiC_ItemStack.ItemStack.itemValue, needed);
-
-                    if (pulled > 0)
-                    {
-                        xUiC_ItemStack.ItemStack.count += pulled;
-                        xUiC_ItemStack.ForceRefreshItemStack();
-                        LogDebug($"Trader sell: Pulled {pulled} items from containers");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                LogWarning($"Error in trader sell patch: {ex.Message}");
-            }
-        }
-    }
-
-    /// <summary>
-    /// Patch ItemActionEntrySell.RefreshEnabled to show max count including containers.
-    /// Uses POSTFIX to update the BuySellCounter.MaxCount after vanilla calculation.
-    /// </summary>
-    [HarmonyPatch(typeof(ItemActionEntrySell), "RefreshEnabled")]
-    [HarmonyPriority(Priority.Low)]
-    private static class ItemActionEntrySell_RefreshEnabled_Patch
-    {
-        public static void Postfix(ItemActionEntrySell __instance)
-        {
-            if (!Config?.modEnabled == true || !Config?.enableTraderSelling == true)
-                return;
-
-            try
-            {
-                // Get the ItemController field from BaseItemActionEntry
-                var itemControllerField = typeof(BaseItemActionEntry).GetField("ItemController",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                var itemController = itemControllerField?.GetValue(__instance) as XUiController;
-
-                var xUiC_ItemStack = itemController as XUiC_ItemStack;
-                if (xUiC_ItemStack?.ItemStack == null || xUiC_ItemStack.ItemStack.IsEmpty())
-                    return;
-
-                // Get the InfoWindow field to access BuySellCounter
-                var infoWindow = xUiC_ItemStack.InfoWindow;
-                if (infoWindow?.BuySellCounter == null)
-                    return;
-
-                // Get container count for this item
-                int containerCount = ContainerManager.GetItemCount(Config, xUiC_ItemStack.ItemStack.itemValue);
-
-                if (containerCount > 0)
-                {
-                    int currentMax = infoWindow.BuySellCounter.MaxCount;
-                    int newMax = AdaptivePatching.SafeAddCount(currentMax, containerCount);
-                    infoWindow.BuySellCounter.MaxCount = newMax;
-                    LogDebug($"Trader sell: Updated max count from {currentMax} to {newMax} (+{containerCount} from containers)");
-                }
-            }
-            catch (Exception ex)
-            {
-                LogWarning($"Error in trader sell RefreshEnabled patch: {ex.Message}");
-            }
-        }
-    }
 
     #endregion
 
@@ -1582,13 +1570,12 @@ public class ProxiCraft : IModApi
                 // Cap at maxCount
                 int displayCount = Math.Min(totalCount, maxCount);
                 
-                FileLog($"HandleUpdatingCurrent_Patch: Item={expectedItem.ItemClass?.GetItemName()}, inventory={inventoryCount}, containers={containerCount}, total={totalCount}, max={maxCount}");
-                
                 // SET the current field to include container items
+                // Only log when we actually find containers items (reduce spam)
                 if (containerCount > 0 && currentField != null && displayCount != inventoryCount)
                 {
                     currentField.SetValue(__instance, displayCount);
-                    FileLog($"[UPDATE] Set Current to {displayCount} (was {inventoryCount})");
+                    FileLog($"[CHALLENGE] {expectedItem.ItemClass?.GetItemName()}: inv={inventoryCount} + containers={containerCount} = {displayCount}/{maxCount}");
                 }
             }
             catch (Exception ex)
@@ -1683,18 +1670,18 @@ public class ProxiCraft : IModApi
                 int playerToolbeltCount = player.inventory?.GetItemCount(expectedItem) ?? 0;
                 int actualInventory = playerBagCount + playerToolbeltCount;
                 
-                FileLog($"[DIAG] === PLAYER INVENTORY: bag={playerBagCount}, toolbelt={playerToolbeltCount}, total={actualInventory} ===");
-                
                 // Count in containers
                 int containerCount = ContainerManager.GetItemCount(Config, expectedItem);
+                
+                // Only process if containers have items (reduce spam)
+                if (containerCount <= 0)
+                    return;
                 
                 // Total possession = actual inventory + containers
                 int totalPossession = actualInventory + containerCount;
                 
                 // Cap display at maxCount
                 int displayCount = Math.Min(totalPossession, maxCount);
-                
-                FileLog($"[DIAG] === GRAND TOTAL: inv={actualInventory} + containers={containerCount} = {totalPossession}, showing {displayCount}/{maxCount} ===");
 
                 // Replace the gather progress with total possession in the display
                 if (totalPossession != gatherProgress)
@@ -1705,7 +1692,6 @@ public class ProxiCraft : IModApi
                     if (__result.Contains(oldPattern))
                     {
                         __result = __result.Replace(oldPattern, newPattern);
-                        FileLog($"StatusText_Patch: Changed '{oldPattern}' to '{newPattern}' -> {__result}");
                     }
                 }
             }
@@ -1791,10 +1777,12 @@ public class ProxiCraft : IModApi
                 // Count in containers
                 int containerCount = ContainerManager.GetItemCount(Config, expectedItem);
                 
+                // Only process if containers have items (reduce spam)
+                if (containerCount <= 0)
+                    return;
+                
                 // Total possession = actual inventory + containers
                 int totalPossession = actualInventory + containerCount;
-                
-                FileLog($"CheckComplete_Patch: Item={expectedItem.ItemClass?.GetItemName()}, actualInv={actualInventory}, containers={containerCount}, totalPossession={totalPossession}, max={maxCount}, handleComplete={handleComplete}");
                 
                 if (totalPossession >= maxCount)
                 {
@@ -1809,11 +1797,9 @@ public class ProxiCraft : IModApi
                         if (!currentComplete)
                         {
                             completeProperty.SetValue(__instance, true);
-                            FileLog($"CheckComplete_Patch: Set Complete=true for green highlighting!");
+                            FileLog($"[CHALLENGE] {expectedItem.ItemClass?.GetItemName()} completed via containers (inv={actualInventory}, containers={containerCount})");
                         }
                     }
-                    
-                    FileLog($"CheckComplete_Patch: Marking complete!");
                 }
             }
             catch (Exception ex)
@@ -2653,11 +2639,22 @@ public class ProxiCraft : IModApi
 
     /// <summary>
     /// Patch Inventory.AddItem to invalidate cache when items are added to toolbelt.
+    /// Must use TargetMethod to specify exact overload since there are multiple AddItem methods.
     /// </summary>
-    [HarmonyPatch(typeof(Inventory), nameof(Inventory.AddItem))]
+    [HarmonyPatch]
     [HarmonyPriority(Priority.Low)]
     private static class Inventory_AddItem_Patch
     {
+        static MethodBase TargetMethod()
+        {
+            // Target AddItem(ItemStack, out int) specifically
+            return typeof(Inventory).GetMethod(nameof(Inventory.AddItem), 
+                BindingFlags.Public | BindingFlags.Instance, 
+                null,
+                new Type[] { typeof(ItemStack), typeof(int).MakeByRefType() },
+                null);
+        }
+
         public static void Postfix()
         {
             if (!Config?.modEnabled == true)
@@ -2683,10 +2680,17 @@ public class ProxiCraft : IModApi
     // 3. Refresh recipe tracker to update ingredient counts
     //
     // This ensures all displays update immediately when slot locks change.
+    // 
+    // DEBOUNCING: When containers open, all slots get their lock state initialized.
+    // We debounce updates to avoid firing hundreds of events per container open.
     // ====================================================================================
+
+    private static float _lastSlotLockUpdateTime = 0f;
+    private const float SLOT_LOCK_DEBOUNCE_TIME = 0.1f; // 100ms debounce
 
     /// <summary>
     /// Patch XUiC_ItemStack.UserLockedSlot setter to trigger updates when lock state changes.
+    /// Uses debouncing to avoid spam when many slots are initialized at once.
     /// </summary>
     [HarmonyPatch(typeof(XUiC_ItemStack), nameof(XUiC_ItemStack.UserLockedSlot), MethodType.Setter)]
     [HarmonyPriority(Priority.Low)]
@@ -2703,10 +2707,19 @@ public class ProxiCraft : IModApi
 
             try
             {
-                // Invalidate cache so locked/unlocked items are recounted
+                // Always invalidate cache immediately (this is cheap)
                 ContainerManager.InvalidateCache();
                 
-                FileLog($"[LOCK] Slot lock changed to {value} at {__instance.StackLocation}:{__instance.SlotNumber}");
+                // Debounce the expensive operations
+                float currentTime = Time.time;
+                if (currentTime - _lastSlotLockUpdateTime < SLOT_LOCK_DEBOUNCE_TIME)
+                {
+                    // Within debounce window, skip expensive operations
+                    return;
+                }
+                
+                // Fire the update
+                _lastSlotLockUpdateTime = currentTime;
                 
                 // Refresh recipe tracker
                 RefreshRecipeTracker();
@@ -2714,7 +2727,7 @@ public class ProxiCraft : IModApi
                 // Mark HUD ammo counter as dirty
                 MarkHudAmmoDirty();
                 
-                // Fire DragAndDropItemChanged to update challenge tracker
+                // Fire DragAndDropItemChanged to update challenge tracker (only once per debounce window)
                 if (Config?.enableForQuests == true)
                 {
                     var player = GameManager.Instance?.World?.GetPrimaryPlayer();
@@ -2727,7 +2740,6 @@ public class ProxiCraft : IModApi
                         {
                             var eventDelegate = eventField.GetValue(player) as Delegate;
                             eventDelegate?.DynamicInvoke();
-                            FileLog("[LOCK] Fired DragAndDropItemChanged after lock change");
                         }
                     }
                 }
@@ -2744,38 +2756,34 @@ public class ProxiCraft : IModApi
     #region Harmony Patches - Trader Purchase Fix
 
     // ====================================================================================
-    // TRADER PURCHASE FIX
+    // TRADER PURCHASE/SELL FIX
     // ====================================================================================
     //
-    // Fixes buying items from traders using currency from nearby containers (drone, etc.)
+    // Fixes buying/selling with traders using items from nearby containers (drone, etc.)
     // 
-    // PROBLEM: ItemActionEntryPurchase.OnActivated uses playerInventory.RemoveItem for currency.
-    // This only removes from player bag, not from containers.
+    // CanSwapItems is called with:
+    //   _removedStack = items player gives (currency when buying, items when selling)
+    //   _addedStack = items player receives (items when buying, currency when selling)
     //
-    // SOLUTION:
-    // 1. Patch CanSwapItems to return true if player + containers have enough currency
-    // 2. Patch RemoveItem to also remove currency from containers if needed
+    // BUYING: Need currency from containers to pay
+    // SELLING: Need items from containers to sell
     //
-    // The RefreshEnabled patch already shows correct currency count via GetItemCount patch.
+    // The patch checks if player + containers have enough of _removedStack.
     // ====================================================================================
 
     /// <summary>
-    /// Patch XUiM_PlayerInventory.CanSwapItems to consider containers for both currency and items.
-    /// This allows purchases when currency is in containers, and selling when items are in containers.
+    /// Patch XUiM_PlayerInventory.CanSwapItems to consider containers for both buying and selling.
     /// 
-    /// BUYING: _a = currency (dukes), _b = item being purchased
-    ///   - We need enough currency in inventory+containers to pay
-    ///   - We need space for the purchased item
-    ///   
-    /// NOTE: Selling items FROM containers is not supported - the trader UI only displays
-    /// items that are in the player's inventory. Supporting this would require patching
-    /// the trader UI to show container items, which is a major feature.
+    /// BUYING: _removedStack = currency, _addedStack = purchased item
+    /// SELLING: _removedStack = item being sold, _addedStack = currency received
+    /// 
+    /// In both cases, we need to check if player + containers have enough of _removedStack.
     /// </summary>
     [HarmonyPatch(typeof(XUiM_PlayerInventory), nameof(XUiM_PlayerInventory.CanSwapItems))]
     [HarmonyPriority(Priority.Low)]
     private static class XUiM_PlayerInventory_CanSwapItems_Patch
     {
-        public static void Postfix(XUiM_PlayerInventory __instance, ref bool __result, ItemStack _a, ItemStack _b)
+        public static void Postfix(XUiM_PlayerInventory __instance, ref bool __result, ItemStack _removedStack, ItemStack _addedStack, int _slotNumber)
         {
             // Only process if vanilla said false and we might be able to help
             if (__result || !Config?.modEnabled == true || !Config?.enableForTrader == true)
@@ -2787,31 +2795,58 @@ public class ProxiCraft : IModApi
 
             try
             {
-                var currencyItem = ItemClass.GetItem(TraderInfo.CurrencyItem, false);
-                
-                // BUYING - _a is currency (what we're paying)
-                // When buying, check if player + containers have enough currency
-                if (_a?.itemValue?.type == currencyItem.type)
-                {
-                    int containerCount = ContainerManager.GetItemCount(Config, currencyItem);
-                    int playerCount = __instance.GetItemCount(currencyItem);
-                    int totalCurrency = playerCount + containerCount;
+                if (_removedStack == null || _removedStack.IsEmpty() || _addedStack == null || _addedStack.IsEmpty())
+                    return;
 
-                    if (totalCurrency >= _a.count)
-                    {
-                        // Check if we have space for _b (the item we're buying)
-                        int availableSpace = __instance.CountAvailableSpaceForItem(_b.itemValue);
-                        if (availableSpace >= _b.count)
-                        {
-                            __result = true;
-                            LogDebug($"CanSwapItems (BUY): Allowing purchase, currency={totalCurrency}, needed={_a.count}");
-                        }
-                    }
+                var currencyItem = ItemClass.GetItem(TraderInfo.CurrencyItem, false);
+                bool isBuying = _removedStack.itemValue.type == currencyItem.type;
+                bool isSelling = _addedStack.itemValue.type == currencyItem.type;
+
+                FileLog($"[CANSWAP] removedStack={_removedStack.itemValue.ItemClass?.GetItemName()}x{_removedStack.count}, addedStack={_addedStack.itemValue.ItemClass?.GetItemName()}x{_addedStack.count}, isBuying={isBuying}, isSelling={isSelling}");
+
+                // Get container count for the item being REMOVED (given away)
+                int containerCount = ContainerManager.GetItemCount(Config, _removedStack.itemValue);
+                
+                if (containerCount <= 0)
+                {
+                    FileLog($"[CANSWAP] No containers have {_removedStack.itemValue.ItemClass?.GetItemName()}");
+                    return;
+                }
+
+                // Get player's count of the item being removed
+                int playerCount = __instance.GetItemCount(_removedStack.itemValue);
+                int totalAvailable = playerCount + containerCount;
+
+                FileLog($"[CANSWAP] playerCount={playerCount}, containerCount={containerCount}, totalAvailable={totalAvailable}, needed={_removedStack.count}");
+
+                // Check if we have enough to remove
+                if (totalAvailable < _removedStack.count)
+                {
+                    FileLog($"[CANSWAP] Not enough items even with containers");
+                    return;
+                }
+
+                // Check if we have space for the item being ADDED (received)
+                int availableSpace = __instance.CountAvailableSpaceForItem(_addedStack.itemValue);
+                
+                FileLog($"[CANSWAP] availableSpace={availableSpace}, needed={_addedStack.count}");
+
+                if (availableSpace >= _addedStack.count)
+                {
+                    __result = true;
+                    string action = isBuying ? "BUY" : (isSelling ? "SELL" : "SWAP");
+                    LogDebug($"CanSwapItems ({action}): Allowing with containers, have={totalAvailable}, need={_removedStack.count}");
+                    FileLog($"[CANSWAP] SUCCESS! Setting result=true");
+                }
+                else
+                {
+                    FileLog($"[CANSWAP] Not enough space for received items");
                 }
             }
             catch (Exception ex)
             {
                 LogWarning($"Error in CanSwapItems patch: {ex.Message}");
+                FileLog($"[CANSWAP] ERROR: {ex.Message}");
             }
         }
     }

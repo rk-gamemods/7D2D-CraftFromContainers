@@ -86,9 +86,9 @@ public class ModConfig
     public bool enableRecipeTrackerUpdates = true;
 
     /// <summary>
-    /// [NOT IMPLEMENTED] Allow selling items from nearby containers to traders.
-    /// This feature would require adding virtual item slots to the trader UI,
-    /// which is a significant undertaking. Currently has no effect.
+    /// REMOVED: This feature was removed due to item duplication bugs.
+    /// See TRADER_SELLING_POSTMORTEM.md for details.
+    /// Kept for config file backward compatibility (ignored).
     /// </summary>
     public bool enableTraderSelling = false;
 

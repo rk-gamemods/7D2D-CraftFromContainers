@@ -191,7 +191,7 @@ Examples:
         Output($"    Trader: {GetFeatureStatus(config?.enableForTrader)}");
         Output($"    Reload: {GetFeatureStatus(config?.enableForReload)}");
         Output($"    Refuel: {GetFeatureStatus(config?.enableForRefuel)}");
-        Output($"    Vehicle Storage: {GetFeatureStatus(config?.enableFromVehicles)}");
+        Output($"    Vehicle Storage: {GetFeatureStatus(config?.pullFromVehicles)}");
         Output("");
         Output($"  Range: {(config?.range <= 0 ? "Unlimited" : $"{config?.range} blocks")}");
         
@@ -225,6 +225,11 @@ Examples:
         {
             Output(line);
         }
+        
+        // Add scan method diagnostics
+        Output("");
+        Output("=== Entity Scan Method ===");
+        Output(ContainerManager.GetScanMethodDiagnostics(ProxiCraft.Config));
     }
 
     private void TestContainerScan()

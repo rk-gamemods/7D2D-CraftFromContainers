@@ -8,6 +8,48 @@ using UnityEngine;
 namespace ProxiCraft;
 
 /// <summary>
+/// Wrapper for entity-based storage (vehicles, drones) that tracks the entity reference
+/// for live position checks. Unlike tile entities, entities can move.
+/// </summary>
+public class EntityStorage
+{
+    public Entity Entity { get; }
+    public Bag Bag { get; }
+    public ITileEntityLootable LootContainer { get; }
+    
+    public EntityStorage(Entity entity, Bag bag)
+    {
+        Entity = entity;
+        Bag = bag;
+        LootContainer = null;
+    }
+    
+    public EntityStorage(Entity entity, ITileEntityLootable lootContainer)
+    {
+        Entity = entity;
+        Bag = null;
+        LootContainer = lootContainer;
+    }
+    
+    /// <summary>
+    /// Gets the current world position of this entity's storage.
+    /// Returns entity's live position since entities can move.
+    /// </summary>
+    public Vector3 GetCurrentPosition()
+    {
+        return Entity?.position ?? Vector3.zero;
+    }
+    
+    /// <summary>
+    /// Checks if the entity is still valid (not despawned/removed).
+    /// </summary>
+    public bool IsValid()
+    {
+        return Entity != null && !Entity.IsDead();
+    }
+}
+
+/// <summary>
 /// Manages container storage discovery and item operations for the ProxiCraft mod.
 ///
 /// RESPONSIBILITIES:
@@ -60,6 +102,10 @@ public static class ContainerManager
     private static Vector3 _lastScanPosition;
     private const float SCAN_COOLDOWN = 0.1f; // Don't rescan more than 10 times per second
     private const float POSITION_CHANGE_THRESHOLD = 1f; // Rescan if player moved more than 1 unit
+    
+    // Cleanup timing for unlimited range mode (remove destroyed containers)
+    private static float _lastCleanupTime;
+    private const float CLEANUP_INTERVAL = 10f; // Clean up stale refs every 10 seconds
     
     // Flag to force cache refresh (set when containers change)
     private static bool _forceCacheRefresh = true;
@@ -161,6 +207,123 @@ public static class ContainerManager
         CurrentOpenVehicle = null;
         CurrentOpenDrone = null;
         CurrentOpenWorkstation = null;
+        // Reset scan method decision to force re-evaluation on next scan
+        _scanMethodCalculated = false;
+    }
+
+    /// <summary>
+    /// Gets diagnostic info about the current entity scan method.
+    /// </summary>
+    public static string GetScanMethodDiagnostics(ModConfig config)
+    {
+        var world = GameManager.Instance?.World;
+        if (world == null)
+            return "World not loaded";
+        
+        int entityCount = world.Entities?.list?.Count ?? 0;
+        float range = config.range;
+        
+        string method;
+        string reason;
+        
+        if (range <= 0f)
+        {
+            method = "Entity Iteration";
+            reason = "Unlimited range requires full entity scan";
+        }
+        else if (range <= SPATIAL_ALWAYS_BETTER_RANGE)
+        {
+            method = "Spatial Query";
+            reason = $"Range ≤{SPATIAL_ALWAYS_BETTER_RANGE} always uses spatial";
+        }
+        else
+        {
+            float chunksPerSide = range / 8f;
+            float chunkLookupCost = chunksPerSide * chunksPerSide;
+            float entityCostThreshold = entityCount * 2f;
+            
+            bool useSpatial = chunkLookupCost < entityCostThreshold;
+            method = useSpatial ? "Spatial Query" : "Entity Iteration";
+            reason = $"ChunkLookups={chunkLookupCost:F0} vs EntityCost={entityCostThreshold:F0}";
+        }
+        
+        return $"Method: {method} | Range: {(range <= 0 ? "Unlimited" : range.ToString("F0"))} | " +
+               $"Entities: {entityCount} | {reason}";
+    }
+
+    /// <summary>
+    /// Forces re-evaluation of the scan method. Call after config reload.
+    /// </summary>
+    public static void ResetScanMethodCache()
+    {
+        _scanMethodCalculated = false;
+    }
+
+    // ====================================================================================
+    // CENTRALIZED RANGE CHECK
+    // ====================================================================================
+    // All container access should go through this function to check if within range.
+    // Uses current player position (not cached) since vehicles/drones/player all move.
+    // ====================================================================================
+    
+    /// <summary>
+    /// Checks if a world position is within the configured range of the player.
+    /// Uses current player position for accuracy with moving entities.
+    /// </summary>
+    /// <param name="config">Mod configuration</param>
+    /// <param name="worldPos">Position to check (can be Vector3 or Vector3i)</param>
+    /// <returns>True if within range, or if range is unlimited (-1 or 0)</returns>
+    public static bool IsInRange(ModConfig config, Vector3 worldPos)
+    {
+        // Unlimited range
+        if (config.range <= 0f)
+            return true;
+        
+        var player = GameManager.Instance?.World?.GetPrimaryPlayer();
+        if (player == null)
+            return false;
+        
+        // Use squared distance to avoid sqrt
+        float dx = player.position.x - worldPos.x;
+        float dy = player.position.y - worldPos.y;
+        float dz = player.position.z - worldPos.z;
+        float distSquared = dx * dx + dy * dy + dz * dz;
+        float rangeSquared = config.range * config.range;
+        
+        return distSquared <= rangeSquared;
+    }
+    
+    /// <summary>
+    /// Checks if a world position is within the configured range of the player.
+    /// Overload for Vector3i positions.
+    /// </summary>
+    public static bool IsInRange(ModConfig config, Vector3i worldPos)
+    {
+        return IsInRange(config, new Vector3(worldPos.x, worldPos.y, worldPos.z));
+    }
+
+    /// <summary>
+    /// Pre-warms the container cache by scanning for nearby storage.
+    /// Called on player spawn to eliminate first-access lag.
+    /// </summary>
+    public static void PreWarmCache(ModConfig config)
+    {
+        PerformanceProfiler.StartTimer(PerformanceProfiler.OP_PREWARM_CACHE);
+        try
+        {
+            if (!config.modEnabled)
+                return;
+            
+            // Force a full cache refresh
+            _forceCacheRefresh = true;
+            RefreshStorages(config);
+            
+            ProxiCraft.LogDebug($"Cache pre-warmed: {_currentStorageDict.Count} containers found");
+        }
+        finally
+        {
+            PerformanceProfiler.StopTimer(PerformanceProfiler.OP_PREWARM_CACHE);
+        }
     }
 
     /// <summary>
@@ -170,10 +333,14 @@ public static class ContainerManager
     /// </summary>
     public static List<ItemStack> GetStorageItems(ModConfig config)
     {
+        PerformanceProfiler.StartTimer(PerformanceProfiler.OP_GET_STORAGE_ITEMS);
         var items = new List<ItemStack>();
 
         if (!config.modEnabled)
+        {
+            PerformanceProfiler.StopTimer(PerformanceProfiler.OP_GET_STORAGE_ITEMS);
             return items;
+        }
 
         try
         {
@@ -183,6 +350,62 @@ public static class ContainerManager
             {
                 try
                 {
+                    // Determine actual position for range check
+                    // For EntityStorage (vehicles/drones), use their current live position
+                    // For tile entities, use the dict key (fixed position)
+                    Vector3 containerPos;
+                    if (kvp.Value is EntityStorage entityStorage)
+                    {
+                        if (!entityStorage.IsValid())
+                            continue; // Entity was despawned
+                        containerPos = entityStorage.GetCurrentPosition();
+                    }
+                    else
+                    {
+                        containerPos = new Vector3(kvp.Key.x, kvp.Key.y, kvp.Key.z);
+                    }
+                    
+                    // Centralized range check
+                    if (!IsInRange(config, containerPos))
+                        continue;
+
+                    // Handle EntityStorage (vehicles/drones with live position tracking)
+                    if (kvp.Value is EntityStorage es)
+                    {
+                        if (es.Bag != null)
+                        {
+                            var slots = es.Bag.GetSlots();
+                            if (slots != null)
+                            {
+                                var lockedSlots = es.Bag.LockedSlots;
+                                for (int i = 0; i < slots.Length; i++)
+                                {
+                                    if (config.respectLockedSlots && lockedSlots != null &&
+                                        i < lockedSlots.Length && lockedSlots[i])
+                                        continue;
+                                    var item = slots[i];
+                                    if (item != null && !item.IsEmpty())
+                                        items.Add(item);
+                                }
+                            }
+                        }
+                        else if (es.LootContainer != null)
+                        {
+                            var lootItems = es.LootContainer.items;
+                            if (lootItems != null)
+                            {
+                                for (int i = 0; i < lootItems.Length; i++)
+                                {
+                                    var item = lootItems[i];
+                                    if (item != null && !item.IsEmpty())
+                                        items.Add(item);
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    
+                    // Handle tile entity lootables (storage crates, etc.)
                     if (kvp.Value is ITileEntityLootable lootable)
                     {
                         var lootItems = lootable.items;
@@ -212,6 +435,7 @@ public static class ContainerManager
                     }
                     else if (kvp.Value is Bag bag)
                     {
+                        // Legacy: Bag stored directly (shouldn't happen anymore)
                         var slots = bag.GetSlots();
                         if (slots == null) continue;
 
@@ -253,6 +477,7 @@ public static class ContainerManager
             ProxiCraft.LogError($"Error getting storage items: {ex.Message}");
         }
 
+        PerformanceProfiler.StopTimer(PerformanceProfiler.OP_GET_STORAGE_ITEMS);
         return items;
     }
 
@@ -961,6 +1186,77 @@ public static class ContainerManager
 
                 try
                 {
+                    // Determine actual position for range check
+                    // For EntityStorage (vehicles/drones), use their current live position
+                    // For tile entities, use the dict key (fixed position)
+                    Vector3 containerPos;
+                    if (kvp.Value is EntityStorage entityStorage)
+                    {
+                        if (!entityStorage.IsValid())
+                            continue; // Entity was despawned
+                        containerPos = entityStorage.GetCurrentPosition();
+                    }
+                    else
+                    {
+                        containerPos = new Vector3(kvp.Key.x, kvp.Key.y, kvp.Key.z);
+                    }
+                    
+                    // Centralized range check
+                    if (!IsInRange(config, containerPos))
+                        continue;
+
+                    // Handle EntityStorage (vehicles/drones with live position tracking)
+                    if (kvp.Value is EntityStorage es)
+                    {
+                        if (es.Bag != null)
+                        {
+                            var slots = es.Bag.GetSlots();
+                            if (slots != null)
+                            {
+                                var lockedSlots = es.Bag.LockedSlots;
+                                for (int i = 0; i < slots.Length && remaining > 0; i++)
+                                {
+                                    if (config.respectLockedSlots && lockedSlots != null &&
+                                        i < lockedSlots.Length && lockedSlots[i])
+                                        continue;
+                                    if (slots[i]?.itemValue?.type != item.type)
+                                        continue;
+                                    int toRemove = Math.Min(remaining, slots[i].count);
+                                    ProxiCraft.LogDebug($"Removing {toRemove}/{remaining} {item.ItemClass?.GetItemName() ?? "unknown"} from entity storage");
+                                    if (slots[i].count <= toRemove)
+                                        slots[i].Clear();
+                                    else
+                                        slots[i].count -= toRemove;
+                                    remaining -= toRemove;
+                                    removed += toRemove;
+                                    es.Bag.onBackpackChanged();
+                                }
+                            }
+                        }
+                        else if (es.LootContainer != null)
+                        {
+                            var lootItems = es.LootContainer.items;
+                            if (lootItems != null)
+                            {
+                                for (int i = 0; i < lootItems.Length && remaining > 0; i++)
+                                {
+                                    if (lootItems[i]?.itemValue?.type != item.type)
+                                        continue;
+                                    int toRemove = Math.Min(remaining, lootItems[i].count);
+                                    ProxiCraft.LogDebug($"Removing {toRemove}/{remaining} {item.ItemClass?.GetItemName() ?? "unknown"} from entity loot container");
+                                    if (lootItems[i].count <= toRemove)
+                                        lootItems[i].Clear();
+                                    else
+                                        lootItems[i].count -= toRemove;
+                                    remaining -= toRemove;
+                                    removed += toRemove;
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Handle tile entity lootables (storage crates, etc.)
                     if (kvp.Value is ITileEntityLootable lootable)
                     {
                         var items = lootable.items;
@@ -1011,6 +1307,7 @@ public static class ContainerManager
                     }
                     else if (kvp.Value is Bag bag)
                     {
+                        // Legacy: Bag stored directly (shouldn't happen anymore)
                         var slots = bag.GetSlots();
                         if (slots == null) continue;
 
@@ -1125,6 +1422,7 @@ public static class ContainerManager
 
     /// <summary>
     /// Refreshes the list of accessible storage containers near the player.
+    /// For unlimited range (-1), uses incremental scanning to avoid repeated full scans.
     /// </summary>
     private static void RefreshStorages(ModConfig config)
     {
@@ -1167,8 +1465,12 @@ public static class ContainerManager
             _lastScanTime = currentTime;
             _lastScanPosition = playerPos;
 
-            _currentStorageDict.Clear();
-            _knownStorageDict.Clear();
+            // OPTIMIZATION: Don't clear the storage dict on every rescan.
+            // - New containers are added as they're discovered
+            // - Out-of-range containers stay cached (range is checked at access time anyway)
+            // - Stale refs (destroyed containers) are cleaned up periodically
+            // - Memory cost is trivial (~50KB for 1000 containers)
+            // This makes subsequent scans much faster as we only add, never rebuild.
 
             // Scan entities (vehicles, drones) from the world entity list
             ScanWorldEntities(world, playerPos, config);
@@ -1201,6 +1503,14 @@ public static class ContainerManager
                     }
                 }
             }
+            
+            // Periodically clean up stale entries (every ~10 seconds)
+            // This handles containers that were destroyed
+            if (currentTime - _lastCleanupTime > CLEANUP_INTERVAL)
+            {
+                CleanupStaleContainers(world);
+                _lastCleanupTime = currentTime;
+            }
         }
         catch (Exception ex)
         {
@@ -1211,16 +1521,215 @@ public static class ContainerManager
             PerformanceProfiler.StopTimer(PerformanceProfiler.OP_REFRESH_STORAGES);
         }
     }
+    
+    /// <summary>
+    /// Removes containers that no longer exist in the world.
+    /// Called periodically for unlimited range to prevent stale refs.
+    /// </summary>
+    private static void CleanupStaleContainers(World world)
+    {
+        PerformanceProfiler.StartTimer(PerformanceProfiler.OP_CLEANUP_STALE);
+        var keysToRemove = new List<Vector3i>();
+        
+        foreach (var kvp in _currentStorageDict)
+        {
+            bool stillExists = false;
+            
+            if (kvp.Value is EntityStorage entityStorage)
+            {
+                // EntityStorage wraps vehicles/drones with their entity reference
+                // Check if entity is still valid
+                stillExists = entityStorage.IsValid();
+            }
+            else if (kvp.Value is Bag)
+            {
+                // Legacy: Bags from vehicles/drones stored directly
+                // These are re-added on each entity scan, if entity is gone it won't be re-added
+                stillExists = true;
+            }
+            else if (kvp.Value is ITileEntityLootable || kvp.Value is StorageSourceInfo)
+            {
+                // Tile entities - check if chunk still has it
+                var chunk = world.GetChunkFromWorldPos(kvp.Key) as Chunk;
+                if (chunk != null && chunk.tileEntities?.dict != null)
+                {
+                    var localPos = World.toBlock(kvp.Key);
+                    stillExists = chunk.tileEntities.dict.ContainsKey(localPos);
+                }
+            }
+            
+            if (!stillExists)
+            {
+                keysToRemove.Add(kvp.Key);
+            }
+        }
+        
+        foreach (var key in keysToRemove)
+        {
+            _currentStorageDict.Remove(key);
+            _knownStorageDict.Remove(key);
+        }
+        
+        if (keysToRemove.Count > 0)
+        {
+            ProxiCraft.LogDebug($"Cleaned up {keysToRemove.Count} stale container refs");
+        }
+        PerformanceProfiler.StopTimer(PerformanceProfiler.OP_CLEANUP_STALE);
+    }
+
+    // Reusable lists for entity scanning (avoid allocations)
+    private static readonly List<Entity> _vehicleScanList = new List<Entity>(16);
+    private static readonly List<Entity> _droneScanList = new List<Entity>(8);
+
+    // Cached decision for which scan method to use (calculated once at startup)
+    private static bool _useSpatialQuery = true;
+    private static bool _scanMethodCalculated = false;
+
+    // Threshold below which spatial query is always better (625 chunk lookups max)
+    private const float SPATIAL_ALWAYS_BETTER_RANGE = 200f;
 
     /// <summary>
-    /// Scans world entities for vehicles and drones.
+    /// Determines the most efficient scan method based on world conditions.
+    /// Called once at startup or when config is reloaded.
+    /// For range ≤200, spatial is always better. For larger ranges, compare costs.
+    /// </summary>
+    private static bool ShouldUseSpatialQuery(World world, float range)
+    {
+        // Unlimited range always uses entity iteration
+        if (range <= 0f) return false;
+        
+        // Small ranges: spatial query is always better (≤625 chunk lookups)
+        if (range <= SPATIAL_ALWAYS_BETTER_RANGE) return true;
+        
+        // Large ranges: compare chunk lookup cost vs entity iteration cost
+        // Chunk lookup cost: (range*2/16)^2 = (range/8)^2
+        float chunksPerSide = range / 8f;
+        float chunkLookupCost = chunksPerSide * chunksPerSide;
+        
+        // Entity iteration cost (type checks are ~2x faster than chunk lookups)
+        int entityCount = world.Entities?.list?.Count ?? 0;
+        const float ENTITY_COST_MULTIPLIER = 2f;
+        
+        bool useSpatial = chunkLookupCost < (entityCount * ENTITY_COST_MULTIPLIER);
+        
+        ProxiCraft.LogDebug($"Scan method decision: range={range}, chunks={chunkLookupCost:F0}, " +
+            $"entities={entityCount}, useSpatial={useSpatial}");
+        
+        return useSpatial;
+    }
+
+    /// <summary>
+    /// Calculates and caches the optimal scan method. Call on world load or config reload.
+    /// </summary>
+    public static void CalculateScanMethod(ModConfig config)
+    {
+        var world = GameManager.Instance?.World;
+        if (world == null)
+        {
+            // Default to spatial for reasonable ranges until world loads
+            _useSpatialQuery = config.range > 0f && config.range <= SPATIAL_ALWAYS_BETTER_RANGE;
+            return;
+        }
+        
+        _useSpatialQuery = ShouldUseSpatialQuery(world, config.range);
+        _scanMethodCalculated = true;
+        
+        string method = _useSpatialQuery ? "Spatial Query" : "Entity Iteration";
+        ProxiCraft.Log($"Entity scan method: {method} (range={config.range}, entities={world.Entities?.list?.Count ?? 0})");
+    }
+
+    /// <summary>
+    /// Scans world entities for vehicles and drones using the optimal method.
+    /// Method is chosen once at startup based on range and entity count.
     /// </summary>
     private static void ScanWorldEntities(World world, Vector3 playerPos, ModConfig config)
     {
+        PerformanceProfiler.StartTimer(PerformanceProfiler.OP_SCAN_ENTITIES);
+        try
+        {
+            // Calculate scan method once on first use (in case it wasn't done at startup)
+            if (!_scanMethodCalculated)
+            {
+                CalculateScanMethod(config);
+            }
+            
+            if (_useSpatialQuery && config.range > 0f)
+            {
+                // Bounded range: use spatial query
+                var bounds = new Bounds(playerPos, new Vector3(config.range * 2f, config.range * 2f, config.range * 2f));
+                ScanWorldEntitiesBounded(world, playerPos, config, bounds);
+            }
+            else
+            {
+                // Unlimited range or large range with high entity density: iterate all entities
+                ScanWorldEntitiesUnlimited(world, playerPos, config);
+            }
+        }
+        finally
+        {
+            PerformanceProfiler.StopTimer(PerformanceProfiler.OP_SCAN_ENTITIES);
+        }
+    }
+
+    /// <summary>
+    /// Scans entities using spatial bounds query. Much faster for bounded ranges.
+    /// </summary>
+    private static void ScanWorldEntitiesBounded(World world, Vector3 playerPos, ModConfig config, Bounds bounds)
+    {
+        // Scan for vehicles using spatial query
+        if (config.pullFromVehicles)
+        {
+            _vehicleScanList.Clear();
+            world.GetEntitiesInBounds(typeof(EntityVehicle), bounds, _vehicleScanList);
+            
+            for (int i = 0; i < _vehicleScanList.Count; i++)
+            {
+                if (_vehicleScanList[i] is EntityVehicle vehicle)
+                {
+                    try
+                    {
+                        ProcessVehicleEntity(vehicle, playerPos, config);
+                    }
+                    catch (Exception ex)
+                    {
+                        ProxiCraft.LogWarning($"Error processing vehicle: {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        // Scan for drones using spatial query
+        if (config.pullFromDrones)
+        {
+            _droneScanList.Clear();
+            world.GetEntitiesInBounds(typeof(EntityDrone), bounds, _droneScanList);
+            
+            for (int i = 0; i < _droneScanList.Count; i++)
+            {
+                if (_droneScanList[i] is EntityDrone drone)
+                {
+                    try
+                    {
+                        ProcessDroneEntity(drone, playerPos, config);
+                    }
+                    catch (Exception ex)
+                    {
+                        ProxiCraft.LogWarning($"Error processing drone: {ex.Message}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Scans all world entities for unlimited range mode.
+    /// Slower but necessary for truly unlimited range.
+    /// Still filters by type - only checks vehicles and drones, not zombies/animals.
+    /// </summary>
+    private static void ScanWorldEntitiesUnlimited(World world, Vector3 playerPos, ModConfig config)
+    {
         var entities = world.Entities?.list;
         if (entities == null) return;
-
-        float rangeSquared = config.range > 0f ? config.range * config.range : 0f;
 
         for (int i = 0; i < entities.Count; i++)
         {
@@ -1229,26 +1738,16 @@ public static class ContainerManager
 
             try
             {
-                // Range check first for performance (using squared distance to avoid sqrt)
-                if (rangeSquared > 0f)
-                {
-                    float dx = playerPos.x - entity.position.x;
-                    float dy = playerPos.y - entity.position.y;
-                    float dz = playerPos.z - entity.position.z;
-                    if (dx * dx + dy * dy + dz * dz >= rangeSquared)
-                        continue;
-                }
-
-                // Process vehicles
+                // Type check first - skip zombies, animals, players, etc.
                 if (config.pullFromVehicles && entity is EntityVehicle vehicle)
                 {
                     ProcessVehicleEntity(vehicle, playerPos, config);
                 }
-                // Process drones
                 else if (config.pullFromDrones && entity is EntityDrone drone)
                 {
                     ProcessDroneEntity(drone, playerPos, config);
                 }
+                // All other entity types are ignored (zombies, animals, etc.)
             }
             catch (Exception ex)
             {
@@ -1275,14 +1774,13 @@ public static class ContainerManager
             return;
 
         var vehiclePos = new Vector3i(vehicle.position);
-        _knownStorageDict[vehiclePos] = bag;
+        
+        // Wrap in EntityStorage for live position tracking
+        var entityStorage = new EntityStorage(vehicle, bag);
+        _knownStorageDict[vehiclePos] = entityStorage;
+        _currentStorageDict[vehiclePos] = entityStorage;
 
-        // Already passed range check in ScanWorldEntities, but check again for clarity
-        if (config.range <= 0f || Vector3.Distance(playerPos, vehicle.position) < config.range)
-        {
-            ProxiCraft.LogDebug($"Adding vehicle {((EntityAlive)vehicle).EntityName} at {vehiclePos}");
-            _currentStorageDict[vehiclePos] = bag;
-        }
+        ProxiCraft.LogDebug($"Adding vehicle {((EntityAlive)vehicle).EntityName} at {vehiclePos}");
     }
 
     /// <summary>
@@ -1305,7 +1803,6 @@ public static class ContainerManager
             return;
 
         // Get drone storage - try lootContainer first, then bag
-        Bag droneBag = null;
         if (drone.lootContainer != null)
         {
             // lootContainer is ITileEntityLootable, but we need to get items from it
@@ -1313,78 +1810,88 @@ public static class ContainerManager
             if (lootItems != null && lootItems.Any(i => i != null && !i.IsEmpty()))
             {
                 var dronePos = new Vector3i(drone.position);
-                _knownStorageDict[dronePos] = drone.lootContainer;
-                _currentStorageDict[dronePos] = drone.lootContainer;
+                var droneLootStorage = new EntityStorage(drone, drone.lootContainer);
+                _knownStorageDict[dronePos] = droneLootStorage;
+                _currentStorageDict[dronePos] = droneLootStorage;
                 ProxiCraft.LogDebug($"Adding drone lootContainer at {dronePos}");
                 return;
             }
         }
 
-        droneBag = drone.bag;
+        var droneBag = drone.bag;
         if (droneBag == null || droneBag.IsEmpty())
             return;
 
         var pos = new Vector3i(drone.position);
-        _knownStorageDict[pos] = droneBag;
-        _currentStorageDict[pos] = droneBag;
+        var droneBagStorage = new EntityStorage(drone, droneBag);
+        _knownStorageDict[pos] = droneBagStorage;
+        _currentStorageDict[pos] = droneBagStorage;
         ProxiCraft.LogDebug($"Adding drone bag at {pos}");
     }
 
     private static void ScanChunkTileEntities(Chunk chunk, Vector3 playerPos, ModConfig config)
     {
-        var tileEntityKeys = chunk.tileEntities?.dict?.Keys?.ToArray();
-        if (tileEntityKeys == null) return;
-
-        foreach (var key in tileEntityKeys)
+        PerformanceProfiler.StartTimer(PerformanceProfiler.OP_SCAN_TILE_ENTITIES);
+        try
         {
-            try
+            var tileEntityKeys = chunk.tileEntities?.dict?.Keys?.ToArray();
+            if (tileEntityKeys == null) return;
+
+            foreach (var key in tileEntityKeys)
             {
-                if (!chunk.tileEntities.dict.TryGetValue(key, out var tileEntity))
-                    continue;
-
-                // Skip if being removed
-                if (tileEntity.IsRemoving)
-                    continue;
-
-                var worldPos = tileEntity.ToWorldPos();
-
-                // Range check early for performance
-                if (config.range > 0f && Vector3.Distance(playerPos, (Vector3)worldPos) >= config.range)
-                    continue;
-
-                // Skip if this container is locked by another player in multiplayer
-                if (LockedList.Contains(worldPos))
-                    continue;
-
-                // Process dew collectors
-                if (config.pullFromDewCollectors && tileEntity is TileEntityCollector dewCollector)
+                try
                 {
-                    ProcessDewCollector(dewCollector, worldPos, playerPos, config);
-                    continue;
+                    if (!chunk.tileEntities.dict.TryGetValue(key, out var tileEntity))
+                        continue;
+
+                    // Skip if being removed
+                    if (tileEntity.IsRemoving)
+                        continue;
+
+                    var worldPos = tileEntity.ToWorldPos();
+
+                    // Range check early for performance
+                    if (config.range > 0f && Vector3.Distance(playerPos, (Vector3)worldPos) >= config.range)
+                        continue;
+
+                    // Skip if this container is locked by another player in multiplayer
+                    if (LockedList.Contains(worldPos))
+                        continue;
+
+                    // Process dew collectors
+                    if (config.pullFromDewCollectors && tileEntity is TileEntityCollector dewCollector)
+                    {
+                        ProcessDewCollector(dewCollector, worldPos, playerPos, config);
+                        continue;
+                    }
+
+                    // Process workstation outputs
+                    if (config.pullFromWorkstationOutputs && tileEntity is TileEntityWorkstation workstation)
+                    {
+                        ProcessWorkstationOutput(workstation, worldPos, playerPos, config);
+                        continue;
+                    }
+
+                    // Handle composite tile entities (newer container type)
+                    if (tileEntity is TileEntityComposite composite)
+                    {
+                        ProcessCompositeTileEntity(composite, worldPos, playerPos, config);
+                    }
+                    // Handle legacy secure loot containers
+                    else if (tileEntity is TileEntitySecureLootContainer secureLoot)
+                    {
+                        ProcessSecureLootContainer(secureLoot, worldPos, playerPos, config);
+                    }
                 }
-
-                // Process workstation outputs
-                if (config.pullFromWorkstationOutputs && tileEntity is TileEntityWorkstation workstation)
+                catch (Exception ex)
                 {
-                    ProcessWorkstationOutput(workstation, worldPos, playerPos, config);
-                    continue;
-                }
-
-                // Handle composite tile entities (newer container type)
-                if (tileEntity is TileEntityComposite composite)
-                {
-                    ProcessCompositeTileEntity(composite, worldPos, playerPos, config);
-                }
-                // Handle legacy secure loot containers
-                else if (tileEntity is TileEntitySecureLootContainer secureLoot)
-                {
-                    ProcessSecureLootContainer(secureLoot, worldPos, playerPos, config);
+                    ProxiCraft.LogWarning($"Error scanning tile entity: {ex.Message}");
                 }
             }
-            catch (Exception ex)
-            {
-                ProxiCraft.LogWarning($"Error scanning tile entity: {ex.Message}");
-            }
+        }
+        finally
+        {
+            PerformanceProfiler.StopTimer(PerformanceProfiler.OP_SCAN_TILE_ENTITIES);
         }
     }
 

@@ -2,10 +2,13 @@
   "_comment": "ProxiCraft Configuration - See README for full documentation",
 
   "modEnabled": true,
-  "isDebug": false,
+  "isDebug": true,
   "verboseHealthCheck": false,
 
-  "_rangeNote": "Range in blocks. 15=same floor, 30=building, -1=unlimited (may cause lag). Range does NOT affect Trader - trader purchases work anywhere.",
+  "_rangeNote1": "Range in blocks. 15=same room, 30=building, 50=compound.",
+  "_rangeNote2": "-1=unlimited BUT limited by game's chunk loading (~12 chunks = ~192 blocks by default).",
+  "_rangeNote3": "Chunk loading controlled by: Video>View Distance (client) or ServerMaxAllowedViewDistance (server).",
+  "_rangeNote4": "Setting range > chunk loading distance has no benefit - unloaded containers aren't in memory.",
   "range": 15,
 
   "_storageSourcesNote": "STABLE - What containers to search for items. These only affect WHERE items come from, not HOW they're used.",
@@ -32,6 +35,5 @@
   "_newFeaturesNote": "NEW - Additional stable features using simple postfix patches.",
   "enableHudAmmoCounter": true,
   "enableRecipeTrackerUpdates": true,
-  "enableTraderSelling": true,
   "respectLockedSlots": true
 }

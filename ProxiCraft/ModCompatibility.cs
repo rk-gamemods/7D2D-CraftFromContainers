@@ -166,20 +166,34 @@ public static class ModCompatibility
 
     private static void ScanHarmonyPatches()
     {
-        // Methods we patch that others might also patch
+        // Methods we DIRECTLY patch that could conflict with other mods
+        // Categorized by conflict risk level
         var criticalMethods = new[]
         {
-            ("XUiM_PlayerInventory", "GetAllItemStacks"),
+            // HIGH RISK - Core inventory operations, conflicts likely cause duplication or item loss
             ("XUiM_PlayerInventory", "HasItems"),
             ("XUiM_PlayerInventory", "RemoveItems"),
             ("XUiM_PlayerInventory", "GetItemCount"),
-            ("XUiC_RecipeList", "Update"),
-            ("XUiC_RecipeCraftCount", "calcMaxCraftable"),
-            ("ItemActionEntryCraft", "OnActivated"),
             ("Inventory", "DecItem"),
             ("Bag", "DecItem"),
-            ("EntityVehicle", "hasGasCan"),
-            ("EntityVehicle", "takeFuel"),
+            ("Bag", "AddItem"),
+            
+            // MEDIUM RISK - Feature-specific, conflicts may cause feature malfunction
+            ("ItemActionEntryCraft", "hasItems"),           // Crafting availability check
+            ("XUiC_RecipeList", "Update"),                  // Recipe list display (transpiler)
+            ("XUiC_RecipeCraftCount", "calcMaxCraftable"),  // Max craft count (transpiler)
+            ("EntityVehicle", "hasGasCan"),                 // Vehicle refuel check
+            ("EntityVehicle", "takeFuel"),                  // Vehicle refuel action
+            ("AnimatorRangedReloadState", "GetAmmoCountToReload"), // Reload ammo count
+            ("ItemActionTextureBlock", "checkAmmo"),        // Paint ammo check
+            ("ItemActionTextureBlock", "decreaseAmmo"),     // Paint ammo consume
+            ("XUiC_PowerSourceStats", "BtnRefuel_OnPress"), // Generator refuel
+            
+            // Note: We do NOT directly patch GetAllItemStacks - we inject into methods that CALL it
+            // So another mod patching GetAllItemStacks is not a conflict with us
+            
+            // LOW RISK - UI/state tracking, usually safe even with conflicts
+            // (not listed - OnOpen, OnClose, HandleSlotChanged, etc.)
         };
 
         foreach (var (typeName, methodName) in criticalMethods)
@@ -330,7 +344,7 @@ public static class ModCompatibility
         report.AppendLine($"  Trader purchases: {(ProxiCraft.Config?.enableForTrader == true ? "Enabled" : "Disabled")}");
         report.AppendLine($"  Vehicle refuel: {(ProxiCraft.Config?.enableForRefuel == true ? "Enabled" : "Disabled")}");
         report.AppendLine($"  Weapon reload: {(ProxiCraft.Config?.enableForReload == true ? "Enabled" : "Disabled")}");
-        report.AppendLine($"  Vehicle storage: {(ProxiCraft.Config?.enableFromVehicles == true ? "Enabled" : "Disabled")}");
+        report.AppendLine($"  Vehicle storage: {(ProxiCraft.Config?.pullFromVehicles == true ? "Enabled" : "Disabled")}");
         report.AppendLine($"  Range: {ProxiCraft.Config?.range ?? -1} (-1 = unlimited)");
         
         report.AppendLine("=== End Report ===");
