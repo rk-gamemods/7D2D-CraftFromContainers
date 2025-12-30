@@ -1326,8 +1326,11 @@ public static class ContainerManager
                         // If we removed anything, sync and refresh UI
                         if (removed > 0)
                         {
-                            // Mark as modified for persistence/network sync
-                            CurrentOpenWorkstation.SetModified();
+                            // CRITICAL: Reassign the Output property to trigger the setter
+                            // The setter does: output = ItemStack.Clone(value); setModified();
+                            // Just calling SetModified() isn't enough - we need the property assignment
+                            // to properly sync the changes
+                            CurrentOpenWorkstation.Output = output;
                             
                             // Trigger UI refresh - find the output grid and update it
                             // This may be redundant with vanilla's natural refresh, but ensures correctness
@@ -1555,7 +1558,7 @@ public static class ContainerManager
                             remaining -= toRemove;
                             removed += toRemove;
 
-                            // Mark the source as modified
+                            // Mark the source as modified - for workstations, reassign Output property
                             sourceInfo.MarkModified();
                         }
                     }
@@ -1599,7 +1602,16 @@ public static class ContainerManager
 
         public void MarkModified()
         {
-            if (TileEntity != null)
+            if (TileEntity == null) return;
+            
+            // For workstations, we must reassign the Output property to trigger proper sync
+            // The Output setter does: output = ItemStack.Clone(value); setModified();
+            // Just calling SetModified() doesn't properly sync the item changes
+            if (TileEntity is TileEntityWorkstation workstation && SourceType == "workstation output")
+            {
+                workstation.Output = Items;
+            }
+            else
             {
                 TileEntity.SetModified();
             }
