@@ -2,7 +2,7 @@
 
 A 7 Days to Die mod that allows crafting, reloading, refueling, and repairs using items from nearby storage containers.
 
-## ⬇️ [Download ProxiCraft.zip](https://github.com/rk-gamemods/7D2D-ProxiCraft/raw/master/Release/ProxiCraft.zip)
+## ⬇️ [Download ProxiCraft-1.2.0.zip](https://github.com/rk-gamemods/7D2D-ProxiCraft/raw/master/Release/ProxiCraft-1.2.0.zip)
 
 ## Features
 
