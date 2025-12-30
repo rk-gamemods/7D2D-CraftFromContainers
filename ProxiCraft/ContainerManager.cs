@@ -384,6 +384,8 @@ public static class ContainerManager
                 {
                     // Determine actual position for range check
                     // For EntityStorage (vehicles/drones), use their current live position
+                    // For StorageSourceInfo (workstation outputs, dew collectors), use the TileEntity position
+                    //   (dict key has y+10000 offset to avoid collision, so we can't use it for range check)
                     // For tile entities, use the dict key (fixed position)
                     Vector3 containerPos;
                     if (kvp.Value is EntityStorage entityStorage)
@@ -391,6 +393,12 @@ public static class ContainerManager
                         if (!entityStorage.IsValid())
                             continue; // Entity was despawned
                         containerPos = entityStorage.GetCurrentPosition();
+                    }
+                    else if (kvp.Value is StorageSourceInfo sourceInfo && sourceInfo.TileEntity != null)
+                    {
+                        // Use actual TileEntity position, not the dict key (which may have y+10000 offset)
+                        var tePos = sourceInfo.TileEntity.ToWorldPos();
+                        containerPos = new Vector3(tePos.x, tePos.y, tePos.z);
                     }
                     else
                     {
@@ -1340,6 +1348,8 @@ public static class ContainerManager
                 {
                     // Determine actual position for range check
                     // For EntityStorage (vehicles/drones), use their current live position
+                    // For StorageSourceInfo (workstation outputs, dew collectors), use the TileEntity position
+                    //   (dict key has y+10000 offset to avoid collision, so we can't use it for range check)
                     // For tile entities, use the dict key (fixed position)
                     Vector3 containerPos;
                     if (kvp.Value is EntityStorage entityStorage)
@@ -1347,6 +1357,12 @@ public static class ContainerManager
                         if (!entityStorage.IsValid())
                             continue; // Entity was despawned
                         containerPos = entityStorage.GetCurrentPosition();
+                    }
+                    else if (kvp.Value is StorageSourceInfo sourceInfo && sourceInfo.TileEntity != null)
+                    {
+                        // Use actual TileEntity position, not the dict key (which may have y+10000 offset)
+                        var tePos = sourceInfo.TileEntity.ToWorldPos();
+                        containerPos = new Vector3(tePos.x, tePos.y, tePos.z);
                     }
                     else
                     {
@@ -1508,9 +1524,19 @@ public static class ContainerManager
                         var slots = sourceInfo.Items;
                         if (slots == null) continue;
 
+                        ProxiCraft.LogDebug($"Checking {sourceInfo.SourceType} with {slots.Length} slots for item type {item.type} ({item.ItemClass?.GetItemName()})");
+                        
                         for (int i = 0; i < slots.Length && remaining > 0; i++)
                         {
-                            if (slots[i]?.itemValue?.type != item.type)
+                            if (slots[i] == null || slots[i].itemValue == null)
+                            {
+                                ProxiCraft.LogDebug($"  Slot {i}: null or empty");
+                                continue;
+                            }
+                            
+                            ProxiCraft.LogDebug($"  Slot {i}: type={slots[i].itemValue.type}, count={slots[i].count}, looking for type={item.type}");
+                            
+                            if (slots[i].itemValue.type != item.type)
                                 continue;
 
                             int toRemove = Math.Min(remaining, slots[i].count);
@@ -2124,6 +2150,7 @@ public static class ContainerManager
 
         _knownStorageDict[worldPos] = storage;
         _currentStorageDict[worldPos] = storage;
+        ProxiCraft.LogDebug($"Adding storage container at {worldPos}");
     }
 
     private static void ProcessSecureLootContainer(TileEntitySecureLootContainer secureLoot, Vector3i worldPos, Vector3 playerPos, ModConfig config)
@@ -2138,6 +2165,7 @@ public static class ContainerManager
 
         _knownStorageDict[worldPos] = secureLoot;
         _currentStorageDict[worldPos] = secureLoot;
+        ProxiCraft.LogDebug($"Adding secure loot container at {worldPos}");
     }
 
     private static bool IsContainerInUse(TileEntity tileEntity)

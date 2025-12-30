@@ -1227,6 +1227,57 @@ public class ProxiCraft : IModApi
     #region Harmony Patches - Reload Support
     
     /// <summary>
+    /// Patch ItemActionRanged.CanReload to check containers for ammo.
+    /// 
+    /// CRITICAL: This is the GATEKEEPER for reload!
+    /// The vanilla game checks inventory.GetItemCount and bag.GetItemCount for ammo.
+    /// If both return 0, reload is blocked BEFORE the animation even starts.
+    /// We need to add our container check as a fallback.
+    /// 
+    /// Without this patch, pressing R does nothing when ammo is only in containers.
+    /// The existing transpiler on GetAmmoCountToReload only runs DURING the animation.
+    /// </summary>
+    [HarmonyPatch(typeof(ItemActionRanged), nameof(ItemActionRanged.CanReload))]
+    [HarmonyPriority(Priority.Low)]
+    private static class ItemActionRanged_CanReload_Patch
+    {
+        public static void Postfix(ItemActionRanged __instance, ItemActionData _actionData, ref bool __result)
+        {
+            // If vanilla already allows reload, no need to check containers
+            if (__result)
+                return;
+            
+            // If mod disabled or reload feature disabled, don't override
+            if (!Config?.modEnabled == true || !Config?.enableForReload == true)
+                return;
+            
+            // Safety check
+            if (!IsGameReady())
+                return;
+            
+            try
+            {
+                // Get the ammo type for the current weapon
+                var holdingItemItemValue = _actionData.invData.holdingEntity.inventory.holdingItemItemValue;
+                var ammoItemValue = ItemClass.GetItem(__instance.MagazineItemNames[holdingItemItemValue.SelectedAmmoTypeIndex]);
+                
+                // Check if we have ammo in nearby containers
+                int containerCount = ContainerManager.GetItemCount(Config, ammoItemValue);
+                
+                if (containerCount > 0)
+                {
+                    LogDebug($"CanReload: Found {containerCount} {ammoItemValue.ItemClass?.GetItemName()} in containers - allowing reload");
+                    __result = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogWarning($"Error in CanReload Postfix: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Patch AnimatorRangedReloadState to get ammo from containers.
     ///
     /// ROBUSTNESS:
@@ -1297,10 +1348,14 @@ public class ProxiCraft : IModApi
     /// </summary>
     public static int AddReloadContainerCount(int inventoryCount, ItemValue ammoItem)
     {
+        LogDebug($"AddReloadContainerCount called: inventoryCount={inventoryCount}, ammo={ammoItem?.ItemClass?.GetItemName()}");
+        
         if (!Config?.modEnabled == true || !Config?.enableForReload == true)
             return inventoryCount;
 
-        return GetTotalItemCount(inventoryCount, ammoItem);
+        int result = GetTotalItemCount(inventoryCount, ammoItem);
+        LogDebug($"AddReloadContainerCount: returning {result}");
+        return result;
     }
 
     /// <summary>
@@ -1308,7 +1363,10 @@ public class ProxiCraft : IModApi
     /// </summary>
     public static int DecItemForReload(Inventory inventory, ItemValue item, int count, bool ignoreModded, IList<ItemStack> removedItems)
     {
+        LogDebug($"DecItemForReload called: item={item?.ItemClass?.GetItemName()}, count={count}");
+        
         int removed = inventory.DecItem(item, count, ignoreModded, removedItems);
+        LogDebug($"DecItemForReload: inventory.DecItem returned {removed}");
         
         if (!Config?.modEnabled == true || !Config?.enableForReload == true)
             return removed;
@@ -1320,6 +1378,7 @@ public class ProxiCraft : IModApi
         if (removed < count)
         {
             int remaining = count - removed;
+            LogDebug($"DecItemForReload: Need {remaining} more from containers");
             int containerRemoved = ContainerManager.RemoveItems(Config, item, remaining);
             LogDebug($"Removed {containerRemoved} ammo from containers for reload");
             removed += containerRemoved;

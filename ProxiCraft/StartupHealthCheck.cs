@@ -228,6 +228,18 @@ public static class StartupHealthCheck
             return;
         }
 
+        // Check CanReload patch (gatekeeper - allows reload to start)
+        var canReloadResult = CheckMethodWithFallback(
+            "ReloadCanReload",
+            "Reload gatekeeper (CanReload)",
+            typeof(ItemActionRanged),
+            "CanReload",
+            null,
+            new[] { "canReload", "CheckCanReload" }
+        );
+        AddResult(canReloadResult);
+
+        // Check GetAmmoCountToReload patch (during reload animation)
         var result = CheckMethodWithFallback(
             "Reload",
             "Weapon reload from containers",
