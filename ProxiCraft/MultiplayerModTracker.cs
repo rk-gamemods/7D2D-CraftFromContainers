@@ -386,11 +386,11 @@ public static class MultiplayerModTracker
                 return;
 
             var playerUI = LocalPlayerUI.GetUIForPlayer(player);
-            if (playerUI?.nguiWindowManager?.windowManager == null)
+            if (playerUI?.nguiWindowManager?.WindowManager == null)
                 return;
 
             // Open the console window (non-modal so gameplay isn't blocked)
-            playerUI.nguiWindowManager.windowManager.OpenIfNotOpen(GUIWindowConsole.ID, _bModal: false);
+            playerUI.nguiWindowManager.WindowManager.OpenIfNotOpen(GUIWindowConsole.ID, _bModal: false);
         }
         catch
         {
