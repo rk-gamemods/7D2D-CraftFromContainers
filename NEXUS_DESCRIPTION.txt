@@ -312,8 +312,8 @@ If you find a mod conflict, please report it so we can update this list.
 [*]Client and server state will desync
 [/list]
 
-[u]Server Detection (v1.2.1+):[/u]
-ProxiCraft automatically detects if the server doesn't have it installed and shows a notice in the console with recommendations.
+[u]Multiplayer Safety Lock (v1.2.1+):[/u]
+ProxiCraft automatically detects if the server doesn't have it installed. When this happens, the mod [b]disables itself[/b] to prevent crashes, and shows a notice in the console with recommendations.
 
 [u]Mod Conflicts in Multiplayer:[/u]
 Do NOT mix different container mods between client and server:

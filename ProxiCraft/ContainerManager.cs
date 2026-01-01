@@ -953,20 +953,16 @@ public static class ContainerManager
             // COUNT FROM ADDITIONAL STORAGE SOURCES
             // ================================================================
 
-            // Count from vehicles
+            // Count from vehicles (method has internal profiler timing)
             if (config.pullFromVehicles)
             {
-                PerformanceProfiler.StartTimer(PerformanceProfiler.OP_COUNT_VEHICLES);
                 CountAllVehicleItems(world, playerPos, config);
-                PerformanceProfiler.StopTimer(PerformanceProfiler.OP_COUNT_VEHICLES);
             }
 
-            // Count from drones
+            // Count from drones (method has internal profiler timing)
             if (config.pullFromDrones)
             {
-                PerformanceProfiler.StartTimer(PerformanceProfiler.OP_COUNT_DRONES);
                 CountAllDroneItems(world, playerPos, config);
-                PerformanceProfiler.StopTimer(PerformanceProfiler.OP_COUNT_DRONES);
             }
 
             // Count from dew collectors (TileEntityCollector)

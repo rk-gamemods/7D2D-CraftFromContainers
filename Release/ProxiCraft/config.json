@@ -15,6 +15,15 @@
   "pullFromWorkstationOutputs": true,
   "allowLockedContainers": true,
 
+  "_storagePriorityNote": "Order to search storage sources. Lower numbers = checked first. Items pulled from first available source.",
+  "storagePriority": {
+    "Drone": "1",
+    "DewCollector": "2",
+    "Workstation": "3",
+    "Container": "4",
+    "Vehicle": "5"
+  },
+
   "_coreFeaturesNote": "Main features - what actions can use items from nearby containers",
   "enableForCrafting": true,
   "enableForQuests": true,

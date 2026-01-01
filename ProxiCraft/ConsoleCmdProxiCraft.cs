@@ -663,7 +663,6 @@ Examples:
         Output("[New Features]");
         Output($"  enableHudAmmoCounter = {config.enableHudAmmoCounter}");
         Output($"  enableRecipeTrackerUpdates = {config.enableRecipeTrackerUpdates}");
-        Output($"  enableTraderSelling = {config.enableTraderSelling}");
         Output($"  respectLockedSlots = {config.respectLockedSlots}");
     }
 
