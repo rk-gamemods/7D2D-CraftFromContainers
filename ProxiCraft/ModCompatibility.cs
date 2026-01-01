@@ -17,8 +17,9 @@ public static class ModCompatibility
     private static readonly Dictionary<string, string> KnownConflictingMods = new Dictionary<string, string>
     {
         // Format: { "AssemblyOrNamespace", "Description of conflict" }
-        
+
         // HIGH RISK - Direct conflicts (same functionality)
+        { "BeyondStorage", "Beyond Storage 2 - provides same functionality, patches same methods. Choose one." },
         { "CraftFromContainers", "Original CraftFromContainers mod - provides same functionality, choose one" },
         { "CraftFromContainersPlus", "CraftFromContainers fork - provides same functionality, choose one" },
         { "CraftFromChests", "Similar mod - will conflict with same patches" },
@@ -36,7 +37,7 @@ public static class ModCompatibility
         { "BetterVehicles", "Vehicle mod - may change fuel/storage systems" },
     };
 
-    // Backpack mods we specifically support (logged as compatible, not conflicting)
+    // Backpack mods and other known compatible mods (logged as compatible, not conflicting)
     private static readonly Dictionary<string, string> KnownBackpackMods = new Dictionary<string, string>
     {
         { "BiggerBackpack", "Inventory expansion - compatible (we use additive patching)" },
@@ -50,6 +51,9 @@ public static class ModCompatibility
         { "Inventory", "Inventory mod - likely compatible (we use additive patching)" },
         { "AGF-V2-Backpack72Plus", "AGF 72-slot backpack - compatible (tested)" },
         { "AGF-V2-HUDPlus", "AGF HUD overhaul - compatible (tested)" },
+
+        // Our own companion mods
+        { "AudibleBreakingGlassJars", "Glass jar break sound - compatible (patches ItemActionEat, only reads inventory)" },
     };
 
     // Track detected backpack mods for diagnostic purposes
@@ -135,7 +139,10 @@ public static class ModCompatibility
                     if (assemblyName.IndexOf(knownConflict.Key, StringComparison.OrdinalIgnoreCase) >= 0)
                     {
                         // Determine severity based on the mod type
-                        bool isHighRisk = knownConflict.Key == "CraftFromChests" || 
+                        bool isHighRisk = knownConflict.Key == "BeyondStorage" ||
+                                         knownConflict.Key == "CraftFromContainers" ||
+                                         knownConflict.Key == "CraftFromContainersPlus" ||
+                                         knownConflict.Key == "CraftFromChests" ||
                                          knownConflict.Key == "PullFromContainers" ||
                                          knownConflict.Key == "AutoCraft";
                         

@@ -35,6 +35,8 @@
     <Compile Include="ProxiCraft\StartupHealthCheck.cs" />
     <Compile Include="ProxiCraft\ConsoleCmdProxiCraft.cs" />
     <Compile Include="ProxiCraft\PerformanceProfiler.cs" />
+    <Compile Include="ProxiCraft\MultiplayerModTracker.cs" />
+    <Compile Include="ProxiCraft\NetworkDiagnostics.cs" />
   </ItemGroup>
 
   <ItemGroup>

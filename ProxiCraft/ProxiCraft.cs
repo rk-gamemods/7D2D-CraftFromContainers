@@ -56,7 +56,7 @@ public class ProxiCraft : IModApi
 {
     // Mod metadata
     public const string MOD_NAME = "ProxiCraft";
-    public const string MOD_VERSION = "1.2.0";
+    public const string MOD_VERSION = "1.2.1";
     
     // Static references
     private static ProxiCraft _instance;
@@ -83,6 +83,9 @@ public class ProxiCraft : IModApi
         LoadConfig();
         InitConfigWatcher();
 
+        // Initialize network diagnostics (clears log file for fresh session)
+        NetworkDiagnostics.Init();
+
         // Run compatibility checks first
         ModCompatibility.ScanForConflicts();
         
@@ -100,8 +103,11 @@ public class ProxiCraft : IModApi
             // Run startup health check to validate all features
             StartupHealthCheck.RunHealthCheck(Config);
 
-            // Register for player spawn event to pre-warm cache
+            // Register for player spawn event to pre-warm cache and send multiplayer handshake
             ModEvents.PlayerSpawnedInWorld.RegisterHandler(OnPlayerSpawnedInWorld);
+
+            // Register for player disconnect to clean up multiplayer mod tracking
+            ModEvents.PlayerDisconnected.RegisterHandler(OnPlayerDisconnected);
 
             // Report any compatibility issues
             if (ModCompatibility.HasCriticalConflicts())
@@ -128,16 +134,39 @@ public class ProxiCraft : IModApi
     }
     
     /// <summary>
-    /// Called when player spawns in world - triggers background cache pre-warming.
+    /// Called when player spawns in world - triggers background cache pre-warming and multiplayer handshake.
     /// </summary>
     private static void OnPlayerSpawnedInWorld(ref ModEvents.SPlayerSpawnedInWorldData data)
     {
-        // Only pre-warm for local player
+        // Only handle for local player
         if (!data.IsLocalPlayer)
             return;
-        
+
         // Schedule cache pre-warm after a short delay (let the world fully load)
         ThreadManager.StartCoroutine(PreWarmCacheDelayed());
+
+        // Send multiplayer handshake to announce ProxiCraft presence
+        // This helps detect conflicts with other players using different container mods
+        ThreadManager.StartCoroutine(SendMultiplayerHandshakeDelayed());
+    }
+
+    /// <summary>
+    /// Called when any player disconnects - cleans up multiplayer mod tracking.
+    /// </summary>
+    private static void OnPlayerDisconnected(ref ModEvents.SPlayerDisconnectedData data)
+    {
+        try
+        {
+            // SPlayerDisconnectedData contains ClientInfo and Shutdown properties
+            if (data.ClientInfo?.entityId > 0)
+            {
+                MultiplayerModTracker.OnPlayerDisconnected(data.ClientInfo.entityId);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogWarning($"Error handling player disconnect: {ex.Message}");
+        }
     }
     
     /// <summary>
@@ -148,10 +177,10 @@ public class ProxiCraft : IModApi
     {
         // Wait 2 seconds for world to fully load
         yield return new WaitForSeconds(2f);
-        
+
         if (Config?.modEnabled != true)
             yield break;
-        
+
         try
         {
             LogDebug("Pre-warming container cache...");
@@ -163,7 +192,49 @@ public class ProxiCraft : IModApi
             LogWarning($"Cache pre-warm failed: {ex.Message}");
         }
     }
-    
+
+    /// <summary>
+    /// Sends a multiplayer handshake packet to announce ProxiCraft presence.
+    /// This allows detection of conflicting mods on other players.
+    /// </summary>
+    private static System.Collections.IEnumerator SendMultiplayerHandshakeDelayed()
+    {
+        // Wait for network to be ready
+        yield return new WaitForSeconds(3f);
+
+        if (Config?.modEnabled != true)
+            yield break;
+
+        // Only send handshake in multiplayer
+        if (!SingletonMonoBehaviour<ConnectionManager>.Instance.IsConnected)
+            yield break;
+
+        try
+        {
+            var player = GameManager.Instance?.World?.GetPrimaryPlayer();
+            if (player == null)
+                yield break;
+
+            // Get list of locally detected conflicting mods to include in handshake
+            var localConflicts = ModCompatibility.GetConflicts()
+                .Select(c => c.ModName)
+                .ToList();
+
+            var packet = NetPackageManager.GetPackage<NetPackagePCHandshake>()
+                .Setup(player.entityId, player.PlayerDisplayName, MOD_NAME, MOD_VERSION, localConflicts);
+
+            LogDebug($"Sending multiplayer handshake: {MOD_NAME} v{MOD_VERSION}");
+
+            // Send to server (and server will broadcast to other clients)
+            SingletonMonoBehaviour<ConnectionManager>.Instance.SendToServer(
+                (NetPackage)(object)packet, false);
+        }
+        catch (Exception ex)
+        {
+            LogWarning($"Failed to send multiplayer handshake: {ex.Message}");
+        }
+    }
+
     #endregion
 
     #region Configuration

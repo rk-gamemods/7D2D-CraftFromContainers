@@ -56,6 +56,10 @@ Config Commands:
   pc set <setting> <value>    - Shortcut for config set
   pc get <setting>            - Shortcut for config get
 
+Multiplayer Commands:
+  pc mp                       - Show multiplayer mod status
+  pc multiplayer              - Show multiplayer mod status
+
 Performance Commands:
   pc perf          - Show brief performance status
   pc perf on       - Enable profiling (collects timing data)
@@ -122,7 +126,12 @@ Examples:
                 case "debug":
                     ToggleDebug();
                     break;
-                
+
+                case "mp":
+                case "multiplayer":
+                    ShowMultiplayerStatus();
+                    break;
+
                 case "perf":
                 case "performance":
                     HandlePerfCommand(_params);
@@ -347,6 +356,61 @@ Examples:
 
         ProxiCraft.Config.isDebug = !ProxiCraft.Config.isDebug;
         Output($"Debug logging is now {(ProxiCraft.Config.isDebug ? "ON" : "OFF")}");
+    }
+
+    private void ShowMultiplayerStatus()
+    {
+        Output("=== Multiplayer Mod Status ===");
+
+        if (!SingletonMonoBehaviour<ConnectionManager>.Instance.IsConnected)
+        {
+            Output("  Not in multiplayer session.");
+            return;
+        }
+
+        bool isServer = SingletonMonoBehaviour<ConnectionManager>.Instance.IsServer;
+        Output($"  Role: {(isServer ? "Server/Host" : "Client")}");
+        Output($"  Local mod: {ProxiCraft.MOD_NAME} v{ProxiCraft.MOD_VERSION}");
+        Output("");
+
+        var trackedPlayers = MultiplayerModTracker.GetTrackedPlayers();
+        if (trackedPlayers.Count == 0)
+        {
+            Output("  No remote players tracked yet.");
+            Output("  (Players are tracked when they send a ProxiCraft handshake)");
+            return;
+        }
+
+        Output($"  Tracked players: {trackedPlayers.Count}");
+        Output("");
+
+        bool hasConflicts = false;
+        foreach (var kvp in trackedPlayers)
+        {
+            var info = kvp.Value;
+            bool isConflict = info.ModName != ProxiCraft.MOD_NAME;
+
+            if (isConflict)
+            {
+                hasConflicts = true;
+                OutputWarning($"  [CONFLICT] {info.PlayerName}:");
+                OutputWarning($"    Using: {info.ModName} v{info.ModVersion}");
+            }
+            else
+            {
+                string versionMatch = info.ModVersion == ProxiCraft.MOD_VERSION ? "OK" : "VERSION MISMATCH";
+                Output($"  [OK] {info.PlayerName}: {info.ModName} v{info.ModVersion} ({versionMatch})");
+            }
+        }
+
+        if (hasConflicts)
+        {
+            Output("");
+            OutputWarning("  CONFLICTS DETECTED!");
+            OutputWarning("  Different container mods between players can cause CTD when");
+            OutputWarning("  interacting with containers or workstations.");
+            OutputWarning("  All players should use the same container mod.");
+        }
     }
 
     private void ShowHealthCheck()
