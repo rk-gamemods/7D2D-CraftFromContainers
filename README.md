@@ -267,7 +267,7 @@ ProxiCraft builds on concepts from these mods:
 | Mod | Author | Notes |
 |-----|--------|-------|
 | [CraftFromContainers](https://www.nexusmods.com/7daystodie/mods/2196) | aedenthorn | Original concept for A20 |
-| [BeyondStorage2](https://www.nexusmods.com/7daystodie/mods/5674) | SphereII | Expanded features, storage priority |
+| [BeyondStorage2](https://www.nexusmods.com/7daystodie/mods/7809) | gazorper ([GitHub](https://github.com/superguru/7d2d_mod_BeyondStorage2)) | Expanded features, storage priority |
 
 If you prefer their versions, check them out! ProxiCraft is a from-scratch implementation with different architecture.
 
