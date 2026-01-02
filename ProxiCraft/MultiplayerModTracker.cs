@@ -475,6 +475,51 @@ public static class MultiplayerModTracker
 
     #endregion
 
+    #region Config Sync
+    
+    private static bool _configSyncReceived;
+    
+    /// <summary>
+    /// Gets whether config sync has been received from server.
+    /// </summary>
+    public static bool IsConfigSynced => _configSyncReceived;
+    
+    /// <summary>
+    /// Called when client receives config sync from server.
+    /// </summary>
+    public static void OnConfigSyncReceived()
+    {
+        _configSyncReceived = true;
+        ProxiCraft.LogDebug("[Multiplayer] Config sync complete - using server settings");
+    }
+    
+    /// <summary>
+    /// Sends server config to a specific client.
+    /// Called when server receives a handshake from a client.
+    /// </summary>
+    public static void SendConfigToClient(ClientInfo clientInfo)
+    {
+        try
+        {
+            if (clientInfo == null) return;
+            if (!SingletonMonoBehaviour<ConnectionManager>.Instance?.IsServer == true) return;
+            
+            var config = ProxiCraft.Config;
+            if (config == null) return;
+            
+            var packet = NetPackageManager.GetPackage<NetPackagePCConfigSync>().Setup(config);
+            clientInfo.SendPackage((NetPackage)(object)packet);
+            
+            ProxiCraft.LogDebug($"[Multiplayer] Sent config sync to client '{clientInfo.playerName}'");
+        }
+        catch (Exception ex)
+        {
+            ProxiCraft.LogDebug($"[Multiplayer] SendConfigToClient error: {ex.Message}");
+        }
+    }
+    
+    #endregion
+
     /// <summary>
     /// Called when we receive a handshake from another player.
     /// </summary>
@@ -494,10 +539,17 @@ public static class MultiplayerModTracker
 
             _playerMods[entityId] = info;
 
-            // If we're the host, mark this client as confirmed
-            if (_isHosting)
+            // If we're the host/server, mark this client as confirmed and send them our config
+            if (_isHosting || SingletonMonoBehaviour<ConnectionManager>.Instance?.IsServer == true)
             {
                 OnClientHandshakeReceived(entityId);
+                
+                // Send server config to this client so they use the same settings
+                var clientInfo = SingletonMonoBehaviour<ConnectionManager>.Instance?.Clients?.ForEntityId(entityId);
+                if (clientInfo != null)
+                {
+                    SendConfigToClient(clientInfo);
+                }
             }
 
             ProxiCraft.Log($"[Multiplayer] Player '{info.PlayerName}' joined with {info.ModName} v{info.ModVersion}");
@@ -615,6 +667,7 @@ public static class MultiplayerModTracker
             _hostLockCulprit = null;
             _immediatelyLockMod = false;
             _unverifiedClientCount = 0;
+            _configSyncReceived = false;
         }
         catch
         {
@@ -961,6 +1014,305 @@ internal class NetPackagePCHandshake : NetPackage
         catch
         {
             // Broadcast failed - not critical
+        }
+    }
+}
+
+/// <summary>
+/// Network packet for syncing server config to clients.
+/// Server sends this to clients after handshake to ensure all players use the same settings.
+///
+/// CRITICAL FOR STABILITY:
+/// - All clients MUST use server's range setting to avoid item visibility desync
+/// - All clients MUST use server's feature toggles to avoid state mismatch
+/// - Client settings are overridden with server settings on receipt
+/// - Differences are logged to help diagnose issues
+/// </summary>
+internal class NetPackagePCConfigSync : NetPackage
+{
+    // Core settings that affect item visibility/behavior
+    public float range;
+    public bool pullFromVehicles;
+    public bool pullFromDrones;
+    public bool pullFromDewCollectors;
+    public bool pullFromWorkstationOutputs;
+    public bool allowLockedContainers;
+    public bool respectLockedSlots;
+    
+    // Feature toggles
+    public bool enableForCrafting;
+    public bool enableForReload;
+    public bool enableForRefuel;
+    public bool enableForTrader;
+    public bool enableForRepairAndUpgrade;
+    public bool enableForQuests;
+    public bool enableForPainting;
+    public bool enableForLockpicking;
+    public bool enableForGeneratorRefuel;
+    public bool enableForItemRepair;
+    public bool enableHudAmmoCounter;
+    public bool enableRecipeTrackerUpdates;
+    
+    // Storage priority as comma-separated "key:value" pairs
+    public string storagePriorityData = "";
+
+    public NetPackagePCConfigSync Setup(ModConfig config)
+    {
+        if (config == null) return this;
+        
+        range = config.range;
+        pullFromVehicles = config.pullFromVehicles;
+        pullFromDrones = config.pullFromDrones;
+        pullFromDewCollectors = config.pullFromDewCollectors;
+        pullFromWorkstationOutputs = config.pullFromWorkstationOutputs;
+        allowLockedContainers = config.allowLockedContainers;
+        respectLockedSlots = config.respectLockedSlots;
+        
+        enableForCrafting = config.enableForCrafting;
+        enableForReload = config.enableForReload;
+        enableForRefuel = config.enableForRefuel;
+        enableForTrader = config.enableForTrader;
+        enableForRepairAndUpgrade = config.enableForRepairAndUpgrade;
+        enableForQuests = config.enableForQuests;
+        enableForPainting = config.enableForPainting;
+        enableForLockpicking = config.enableForLockpicking;
+        enableForGeneratorRefuel = config.enableForGeneratorRefuel;
+        enableForItemRepair = config.enableForItemRepair;
+        enableHudAmmoCounter = config.enableHudAmmoCounter;
+        enableRecipeTrackerUpdates = config.enableRecipeTrackerUpdates;
+        
+        // Serialize storage priority
+        if (config.storagePriority != null)
+        {
+            var pairs = new List<string>();
+            foreach (var kvp in config.storagePriority)
+            {
+                pairs.Add($"{kvp.Key}:{kvp.Value}");
+            }
+            storagePriorityData = string.Join(",", pairs);
+        }
+        
+        return this;
+    }
+
+    public override void read(PooledBinaryReader _br)
+    {
+        try
+        {
+            var reader = (BinaryReader)(object)_br;
+            range = reader.ReadSingle();
+            pullFromVehicles = reader.ReadBoolean();
+            pullFromDrones = reader.ReadBoolean();
+            pullFromDewCollectors = reader.ReadBoolean();
+            pullFromWorkstationOutputs = reader.ReadBoolean();
+            allowLockedContainers = reader.ReadBoolean();
+            respectLockedSlots = reader.ReadBoolean();
+            
+            enableForCrafting = reader.ReadBoolean();
+            enableForReload = reader.ReadBoolean();
+            enableForRefuel = reader.ReadBoolean();
+            enableForTrader = reader.ReadBoolean();
+            enableForRepairAndUpgrade = reader.ReadBoolean();
+            enableForQuests = reader.ReadBoolean();
+            enableForPainting = reader.ReadBoolean();
+            enableForLockpicking = reader.ReadBoolean();
+            enableForGeneratorRefuel = reader.ReadBoolean();
+            enableForItemRepair = reader.ReadBoolean();
+            enableHudAmmoCounter = reader.ReadBoolean();
+            enableRecipeTrackerUpdates = reader.ReadBoolean();
+            
+            storagePriorityData = reader.ReadString() ?? "";
+        }
+        catch (Exception ex)
+        {
+            ProxiCraft.LogDebug($"[ConfigSync] Read error: {ex.Message}");
+        }
+    }
+
+    public override void write(PooledBinaryWriter _bw)
+    {
+        try
+        {
+            base.write(_bw);
+            var writer = (BinaryWriter)(object)_bw;
+            writer.Write(range);
+            writer.Write(pullFromVehicles);
+            writer.Write(pullFromDrones);
+            writer.Write(pullFromDewCollectors);
+            writer.Write(pullFromWorkstationOutputs);
+            writer.Write(allowLockedContainers);
+            writer.Write(respectLockedSlots);
+            
+            writer.Write(enableForCrafting);
+            writer.Write(enableForReload);
+            writer.Write(enableForRefuel);
+            writer.Write(enableForTrader);
+            writer.Write(enableForRepairAndUpgrade);
+            writer.Write(enableForQuests);
+            writer.Write(enableForPainting);
+            writer.Write(enableForLockpicking);
+            writer.Write(enableForGeneratorRefuel);
+            writer.Write(enableForItemRepair);
+            writer.Write(enableHudAmmoCounter);
+            writer.Write(enableRecipeTrackerUpdates);
+            
+            writer.Write(storagePriorityData ?? "");
+        }
+        catch (Exception ex)
+        {
+            ProxiCraft.LogDebug($"[ConfigSync] Write error: {ex.Message}");
+        }
+    }
+
+    public override int GetLength()
+    {
+        return sizeof(float) + sizeof(bool) * 18 + 200; // Approximate
+    }
+
+    public override void ProcessPackage(World _world, GameManager _callbacks)
+    {
+        try
+        {
+            // Only clients process this - servers send it
+            if (SingletonMonoBehaviour<ConnectionManager>.Instance?.IsServer == true)
+                return;
+
+            var localConfig = ProxiCraft.Config;
+            if (localConfig == null)
+            {
+                ProxiCraft.LogWarning("[ConfigSync] Cannot apply server config - local config is null");
+                return;
+            }
+
+            ProxiCraft.Log("======================================================================");
+            ProxiCraft.Log("[Multiplayer] Received server configuration - synchronizing settings...");
+            
+            var differences = new List<string>();
+            
+            // Check and apply each setting, logging differences
+            if (Math.Abs(localConfig.range - range) > 0.01f)
+                differences.Add($"  range: {localConfig.range} → {range}");
+            if (localConfig.pullFromVehicles != pullFromVehicles)
+                differences.Add($"  pullFromVehicles: {localConfig.pullFromVehicles} → {pullFromVehicles}");
+            if (localConfig.pullFromDrones != pullFromDrones)
+                differences.Add($"  pullFromDrones: {localConfig.pullFromDrones} → {pullFromDrones}");
+            if (localConfig.pullFromDewCollectors != pullFromDewCollectors)
+                differences.Add($"  pullFromDewCollectors: {localConfig.pullFromDewCollectors} → {pullFromDewCollectors}");
+            if (localConfig.pullFromWorkstationOutputs != pullFromWorkstationOutputs)
+                differences.Add($"  pullFromWorkstationOutputs: {localConfig.pullFromWorkstationOutputs} → {pullFromWorkstationOutputs}");
+            if (localConfig.allowLockedContainers != allowLockedContainers)
+                differences.Add($"  allowLockedContainers: {localConfig.allowLockedContainers} → {allowLockedContainers}");
+            if (localConfig.respectLockedSlots != respectLockedSlots)
+                differences.Add($"  respectLockedSlots: {localConfig.respectLockedSlots} → {respectLockedSlots}");
+            if (localConfig.enableForCrafting != enableForCrafting)
+                differences.Add($"  enableForCrafting: {localConfig.enableForCrafting} → {enableForCrafting}");
+            if (localConfig.enableForReload != enableForReload)
+                differences.Add($"  enableForReload: {localConfig.enableForReload} → {enableForReload}");
+            if (localConfig.enableForRefuel != enableForRefuel)
+                differences.Add($"  enableForRefuel: {localConfig.enableForRefuel} → {enableForRefuel}");
+            if (localConfig.enableForTrader != enableForTrader)
+                differences.Add($"  enableForTrader: {localConfig.enableForTrader} → {enableForTrader}");
+            if (localConfig.enableForRepairAndUpgrade != enableForRepairAndUpgrade)
+                differences.Add($"  enableForRepairAndUpgrade: {localConfig.enableForRepairAndUpgrade} → {enableForRepairAndUpgrade}");
+            if (localConfig.enableForQuests != enableForQuests)
+                differences.Add($"  enableForQuests: {localConfig.enableForQuests} → {enableForQuests}");
+            if (localConfig.enableForPainting != enableForPainting)
+                differences.Add($"  enableForPainting: {localConfig.enableForPainting} → {enableForPainting}");
+            if (localConfig.enableForLockpicking != enableForLockpicking)
+                differences.Add($"  enableForLockpicking: {localConfig.enableForLockpicking} → {enableForLockpicking}");
+            if (localConfig.enableForGeneratorRefuel != enableForGeneratorRefuel)
+                differences.Add($"  enableForGeneratorRefuel: {localConfig.enableForGeneratorRefuel} → {enableForGeneratorRefuel}");
+            if (localConfig.enableForItemRepair != enableForItemRepair)
+                differences.Add($"  enableForItemRepair: {localConfig.enableForItemRepair} → {enableForItemRepair}");
+            if (localConfig.enableHudAmmoCounter != enableHudAmmoCounter)
+                differences.Add($"  enableHudAmmoCounter: {localConfig.enableHudAmmoCounter} → {enableHudAmmoCounter}");
+            if (localConfig.enableRecipeTrackerUpdates != enableRecipeTrackerUpdates)
+                differences.Add($"  enableRecipeTrackerUpdates: {localConfig.enableRecipeTrackerUpdates} → {enableRecipeTrackerUpdates}");
+            
+            // Apply all settings from server
+            localConfig.range = range;
+            localConfig.pullFromVehicles = pullFromVehicles;
+            localConfig.pullFromDrones = pullFromDrones;
+            localConfig.pullFromDewCollectors = pullFromDewCollectors;
+            localConfig.pullFromWorkstationOutputs = pullFromWorkstationOutputs;
+            localConfig.allowLockedContainers = allowLockedContainers;
+            localConfig.respectLockedSlots = respectLockedSlots;
+            
+            localConfig.enableForCrafting = enableForCrafting;
+            localConfig.enableForReload = enableForReload;
+            localConfig.enableForRefuel = enableForRefuel;
+            localConfig.enableForTrader = enableForTrader;
+            localConfig.enableForRepairAndUpgrade = enableForRepairAndUpgrade;
+            localConfig.enableForQuests = enableForQuests;
+            localConfig.enableForPainting = enableForPainting;
+            localConfig.enableForLockpicking = enableForLockpicking;
+            localConfig.enableForGeneratorRefuel = enableForGeneratorRefuel;
+            localConfig.enableForItemRepair = enableForItemRepair;
+            localConfig.enableHudAmmoCounter = enableHudAmmoCounter;
+            localConfig.enableRecipeTrackerUpdates = enableRecipeTrackerUpdates;
+            
+            // Parse and apply storage priority
+            if (!string.IsNullOrEmpty(storagePriorityData))
+            {
+                var newPriority = new Dictionary<string, string>();
+                foreach (var pair in storagePriorityData.Split(','))
+                {
+                    var parts = pair.Split(':');
+                    if (parts.Length == 2)
+                    {
+                        newPriority[parts[0]] = parts[1];
+                    }
+                }
+                if (newPriority.Count > 0)
+                {
+                    // Check for priority differences
+                    bool priorityChanged = false;
+                    if (localConfig.storagePriority == null || localConfig.storagePriority.Count != newPriority.Count)
+                    {
+                        priorityChanged = true;
+                    }
+                    else
+                    {
+                        foreach (var kvp in newPriority)
+                        {
+                            if (!localConfig.storagePriority.TryGetValue(kvp.Key, out var localVal) || localVal != kvp.Value)
+                            {
+                                priorityChanged = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (priorityChanged)
+                    {
+                        differences.Add($"  storagePriority: (changed to server's priority order)");
+                    }
+                    
+                    localConfig.storagePriority = newPriority;
+                }
+            }
+            
+            // Log results
+            if (differences.Count > 0)
+            {
+                ProxiCraft.Log($"Settings changed from server ({differences.Count} differences):");
+                foreach (var diff in differences)
+                {
+                    ProxiCraft.Log(diff);
+                }
+            }
+            else
+            {
+                ProxiCraft.Log("All settings match server - no changes needed.");
+            }
+            ProxiCraft.Log("======================================================================");
+            
+            // Mark that config sync is complete
+            MultiplayerModTracker.OnConfigSyncReceived();
+        }
+        catch (Exception ex)
+        {
+            ProxiCraft.LogWarning($"[ConfigSync] ProcessPackage error: {ex.Message}");
         }
     }
 }

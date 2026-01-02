@@ -279,6 +279,10 @@ If you find a mod conflict, please report it so we can update this list.
   - Unlocks only after client proves they have ProxiCraft (~100-300ms typical)
   - If client doesn't have mod, they're identified as the culprit by name
   - Auto-re-enables when offending player disconnects
+[*][b]Server Config Sync[/b] - Clients automatically use server's settings (range, features, priority)
+  - Prevents desync where players see different items (crash potential)
+  - Differences are logged when settings change
+[*][b]Configurable Safety Settings[/b] - Tune safety via multiplayerImmediateLock and handshake timeout
 [*][b]Configurable Storage Priority[/b] - Control search order via storagePriority config section (Drone → Dew Collector → Workstation → Container → Vehicle)
 [*][b]Fuzzy Config Matching[/b] - Typos in config keys like "workstaion" auto-correct to "Workstation"
 [*]Added storagePriority section to shipped config.json
@@ -329,6 +333,16 @@ If you find a mod conflict, please report it so we can update this list.
 [b]IMPORTANT:[/b] ProxiCraft must be installed on BOTH client AND server for multiplayer games.
 
 [b]Private/Co-op Games:[/b] If one player hosts (not a dedicated server), the hosting player IS the server. ALL players must have ProxiCraft installed - if only the host has it or only friends have it, crashes will occur when interacting with containers.
+
+[u]Server Config Sync (v1.2.1+):[/u]
+When joining a server, [b]your local settings are automatically overridden[/b] with the server's settings:
+[list]
+[*][b]Range[/b] - All players use the server's range setting
+[*][b]Storage sources[/b] - Vehicles, drones, dew collectors, etc.
+[*][b]Feature toggles[/b] - Crafting, reload, refuel, etc.
+[*][b]Storage priority[/b] - Order of container searching
+[/list]
+This prevents desync where Player A sees items but Player B doesn't (crash potential). Differences are logged so you know what changed.
 
 [u]Multiplayer Safety Lock (v1.2.1+):[/u]
 ProxiCraft automatically protects against mismatched mod installations with ZERO crash window:

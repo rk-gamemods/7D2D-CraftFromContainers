@@ -231,7 +231,8 @@ Examples:
         {
             if (MultiplayerModTracker.IsMultiplayerUnlocked)
             {
-                Output($"  Multiplayer: UNLOCKED (server confirmed)");
+                var syncStatus = MultiplayerModTracker.IsConfigSynced ? ", config synced ✓" : "";
+                Output($"  Multiplayer: UNLOCKED (server confirmed{syncStatus})");
             }
             else if (MultiplayerModTracker.IsWaitingForServer)
             {
@@ -256,6 +257,10 @@ Examples:
         Output($"    Vehicle Storage: {GetFeatureStatus(config?.pullFromVehicles)}");
         Output("");
         Output($"  Range: {(config?.range <= 0 ? "Unlimited" : $"{config?.range} blocks")}");
+        if (MultiplayerModTracker.IsConfigSynced)
+        {
+            Output("  (Settings synchronized from server)");
+        }
         
         var failedPatches = ModCompatibility.GetFailedPatches();
         int failCount = 0;

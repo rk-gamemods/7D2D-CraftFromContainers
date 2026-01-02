@@ -149,6 +149,28 @@ If only the client has ProxiCraft:
 - Crafting/reloading may fail or cause crashes (CTD)
 - State desync between client and server
 
+### Multiplayer Config Sync (v1.2.1+)
+
+When joining a server with ProxiCraft, **your local settings are automatically overridden** with the server's settings:
+
+- **Range** - All players use the server's range setting
+- **Storage sources** - Which containers are searched (vehicles, drones, etc.)
+- **Feature toggles** - Crafting, reload, refuel, etc.
+- **Storage priority** - Order of container searching
+
+This prevents desync issues where Player A sees items in containers but Player B doesn't (crash potential).
+
+Example log when settings differ:
+```
+[Multiplayer] Received server configuration - synchronizing settings...
+Settings changed from server (3 differences):
+  range: 30 → 15
+  pullFromVehicles: false → true
+  enableForReload: true → false
+```
+
+Use `pc status` to confirm settings are synced: `Multiplayer: UNLOCKED (server confirmed, config synced ✓)`
+
 ### Multiplayer Safety Lock (v1.2.1+)
 
 ProxiCraft now includes automatic protection against client/server mismatch:
