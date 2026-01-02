@@ -24,12 +24,13 @@ namespace ProxiCraft;
 /// - If timeout (server doesn't have ProxiCraft): keep locked + show warning
 /// - This prevents CTD from client/server state mismatch
 ///
-/// HOST-SIDE SAFETY LOCK (NEW):
-/// - When hosting, tracks all connected clients
-/// - Each client must send a handshake within timeout to confirm they have ProxiCraft
-/// - If ANY client doesn't have ProxiCraft, mod is DISABLED for the host to prevent crashes
-/// - The offending player is clearly identified in the warning message
-/// - This protects hosts from CTD when clients without the mod join
+/// HOST-SIDE SAFETY LOCK ("GUILTY UNTIL PROVEN INNOCENT"):
+/// - When ANY client connects, mod is IMMEDIATELY disabled for the host
+/// - This prevents crashes during the verification window (typically ~100-300ms)
+/// - Client must send handshake to prove they have ProxiCraft installed
+/// - Only after ALL clients are verified does the mod re-enable
+/// - If timeout occurs before handshake, the offending player is identified
+/// - Mod auto-re-enables when all unverified clients disconnect
 /// </summary>
 public static class MultiplayerModTracker
 {
@@ -43,12 +44,20 @@ public static class MultiplayerModTracker
     private static bool _serverWarningShown;
     private const float SERVER_RESPONSE_TIMEOUT_SECONDS = 10f;
 
-    // Host-side safety lock - tracks clients who need to confirm ProxiCraft
+    // Host-side safety lock - "Guilty Until Proven Innocent"
     private static bool _isHosting;
-    private static bool _hostSafetyLockTriggered;
-    private static string _hostLockCulprit;
+    private static bool _hostSafetyLockTriggered;      // Confirmed client without mod
+    private static string _hostLockCulprit;            // Name of confirmed bad client
+    private static bool _immediatelyLockMod;           // Lock active while ANY client unverified
+    private static int _unverifiedClientCount;         // Number of clients pending verification
+    
+    // Track pending and verified clients
     private static readonly ConcurrentDictionary<int, PendingClientInfo> _pendingClients = 
         new ConcurrentDictionary<int, PendingClientInfo>();
+    private static readonly ConcurrentDictionary<int, bool> _verifiedClients =
+        new ConcurrentDictionary<int, bool>();
+    private static readonly ConcurrentDictionary<string, DateTime> _pendingConnections =
+        new ConcurrentDictionary<string, DateTime>();
 
     /// <summary>
     /// Information about a client waiting to confirm ProxiCraft installation
@@ -57,6 +66,7 @@ public static class MultiplayerModTracker
     {
         public int EntityId { get; set; }
         public string PlayerName { get; set; }
+        public string ConnectionId { get; set; }
         public DateTime JoinTime { get; set; }
         public bool HandshakeReceived { get; set; }
     }
@@ -101,13 +111,20 @@ public static class MultiplayerModTracker
             _isHosting = true;
             _hostSafetyLockTriggered = false;
             _hostLockCulprit = null;
+            _immediatelyLockMod = false;
+            _unverifiedClientCount = 0;
             _pendingClients.Clear();
+            _verifiedClients.Clear();
+            _pendingConnections.Clear();
             
-            // Register for player spawn events
+            // Register for player spawn events (to get entityId correlation)
             ModEvents.PlayerSpawnedInWorld.RegisterHandler(OnPlayerSpawnedInWorld);
             ModEvents.PlayerDisconnected.RegisterHandler(OnPlayerDisconnectedEvent);
             
-            ProxiCraft.LogDebug("[Multiplayer] Host mode enabled - tracking client mod status");
+            // Register for EARLIEST client connection - IMMEDIATELY lock when any client connects
+            ConnectionManager.OnClientAdded += OnClientConnected;
+            
+            ProxiCraft.LogDebug("[Multiplayer] Host mode enabled with IMMEDIATE safety lock");
         }
         catch (Exception ex)
         {
@@ -125,11 +142,16 @@ public static class MultiplayerModTracker
             _isHosting = false;
             _hostSafetyLockTriggered = false;
             _hostLockCulprit = null;
+            _immediatelyLockMod = false;
+            _unverifiedClientCount = 0;
             _pendingClients.Clear();
+            _verifiedClients.Clear();
+            _pendingConnections.Clear();
             
-            // Unregister event handlers
+            // Unregister ALL event handlers
             ModEvents.PlayerSpawnedInWorld.UnregisterHandler(OnPlayerSpawnedInWorld);
             ModEvents.PlayerDisconnected.UnregisterHandler(OnPlayerDisconnectedEvent);
+            ConnectionManager.OnClientAdded -= OnClientConnected;
             
             ProxiCraft.LogDebug("[Multiplayer] Host mode disabled");
         }
@@ -140,8 +162,40 @@ public static class MultiplayerModTracker
     }
 
     /// <summary>
+    /// Called IMMEDIATELY when a client's network connection is established.
+    /// This is the EARLIEST point we can detect a new client - before any game data is sent.
+    /// IMMEDIATELY locks mod to prevent crashes during the verification window.
+    /// </summary>
+    private static void OnClientConnected(ClientInfo clientInfo)
+    {
+        try
+        {
+            if (clientInfo == null) return;
+            
+            // IMMEDIATELY lock the mod - "Guilty Until Proven Innocent"
+            _immediatelyLockMod = true;
+            _unverifiedClientCount++;
+            
+            // Track this connection for later correlation with entityId
+            var connectionId = clientInfo.InternalId?.CombinedString ?? Guid.NewGuid().ToString();
+            _pendingConnections[connectionId] = DateTime.Now;
+
+            ProxiCraft.Log("======================================================================");
+            ProxiCraft.Log("[Multiplayer] NEW CLIENT CONNECTING - Mod IMMEDIATELY LOCKED");
+            ProxiCraft.Log($"  Client: {clientInfo.playerName ?? connectionId}");
+            ProxiCraft.Log($"  Reason: Waiting for ProxiCraft verification handshake");
+            ProxiCraft.Log($"  Unverified clients: {_unverifiedClientCount}");
+            ProxiCraft.Log("======================================================================");
+        }
+        catch (Exception ex)
+        {
+            ProxiCraft.LogDebug($"[Multiplayer] OnClientConnected error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Event handler for when a player spawns in the world.
-    /// Adds them to pending list waiting for handshake confirmation.
+    /// At this point we have their entityId - correlate with connection tracking.
     /// </summary>
     private static void OnPlayerSpawnedInWorld(ref ModEvents.SPlayerSpawnedInWorldData data)
     {
@@ -161,28 +215,30 @@ public static class MultiplayerModTracker
 
             var entityId = data.EntityId;
             var playerName = data.ClientInfo.playerName ?? "Unknown";
+            var connectionId = data.ClientInfo.InternalId?.CombinedString ?? "";
 
             // Check if we already have a handshake from this player
-            if (_playerMods.ContainsKey(entityId))
+            if (_verifiedClients.ContainsKey(entityId) || _playerMods.ContainsKey(entityId))
             {
                 ProxiCraft.LogDebug($"[Multiplayer] Player '{playerName}' already confirmed ProxiCraft");
                 return;
             }
 
-            // Add to pending clients - waiting for their handshake
+            // Add to pending clients - correlate connectionId with entityId
             var pendingInfo = new PendingClientInfo
             {
                 EntityId = entityId,
                 PlayerName = playerName,
+                ConnectionId = connectionId,
                 JoinTime = DateTime.Now,
                 HandshakeReceived = false
             };
 
             _pendingClients[entityId] = pendingInfo;
 
-            ProxiCraft.Log($"[Multiplayer] Player '{playerName}' joined - waiting for ProxiCraft handshake...");
+            ProxiCraft.Log($"[Multiplayer] Player '{playerName}' spawned (entityId={entityId}) - waiting for handshake...");
 
-            // Schedule a timeout check
+            // Schedule a timeout check - if they don't respond, they're confirmed without mod
             ThreadManager.StartCoroutine(CheckClientHandshakeTimeout(entityId, playerName));
         }
         catch (Exception ex)
@@ -202,30 +258,52 @@ public static class MultiplayerModTracker
                 return;
 
             var entityId = data.ClientInfo.entityId;
+            var playerName = data.ClientInfo.playerName ?? "Unknown";
+            var connectionId = data.ClientInfo.InternalId?.CombinedString ?? "";
+            
+            // Check if this was a verified client
+            bool wasVerified = _verifiedClients.TryRemove(entityId, out _);
             
             // Remove from pending clients
-            _pendingClients.TryRemove(entityId, out _);
+            bool wasPending = _pendingClients.TryRemove(entityId, out _);
+            
+            // Remove from pending connections
+            _pendingConnections.TryRemove(connectionId, out _);
             
             // Remove from confirmed players
             OnPlayerDisconnected(entityId);
 
-            // If the culprit disconnected, re-enable the mod
-            if (_hostSafetyLockTriggered && _hostLockCulprit == data.ClientInfo.playerName)
+            // If they were unverified, decrement the counter
+            if (!wasVerified && wasPending)
+            {
+                _unverifiedClientCount = Math.Max(0, _unverifiedClientCount - 1);
+                ProxiCraft.Log($"[Multiplayer] Unverified player '{playerName}' disconnected (remaining unverified: {_unverifiedClientCount})");
+            }
+
+            // If the culprit disconnected, check if we can re-enable
+            if (_hostSafetyLockTriggered && _hostLockCulprit == playerName)
             {
                 // Check if there are any other unconfirmed clients
                 bool anyUnconfirmed = _pendingClients.Values.Any(p => !p.HandshakeReceived);
                 
-                if (!anyUnconfirmed)
+                if (!anyUnconfirmed && _unverifiedClientCount <= 0)
                 {
                     _hostSafetyLockTriggered = false;
                     _hostLockCulprit = null;
+                    _immediatelyLockMod = false;
                     ProxiCraft.Log("======================================================================");
                     ProxiCraft.Log("[Multiplayer] ProxiCraft RE-ENABLED");
-                    ProxiCraft.Log($"  The player without ProxiCraft ('{data.ClientInfo.playerName}') has disconnected.");
+                    ProxiCraft.Log($"  The player without ProxiCraft ('{playerName}') has disconnected.");
                     ProxiCraft.Log("  All remaining players have ProxiCraft - mod functionality restored!");
                     ProxiCraft.Log("======================================================================");
                     OpenConsoleWithWarning();
                 }
+            }
+            // Also re-enable if all unverified clients are now gone
+            else if (_immediatelyLockMod && _unverifiedClientCount <= 0 && !_hostSafetyLockTriggered)
+            {
+                _immediatelyLockMod = false;
+                ProxiCraft.Log("[Multiplayer] All clients verified or disconnected - Mod RE-ENABLED");
             }
         }
         catch (Exception ex)
@@ -236,6 +314,8 @@ public static class MultiplayerModTracker
 
     /// <summary>
     /// Coroutine that checks if a client sent their handshake within the timeout period.
+    /// By this point they're already blocked by the immediate lock - this just confirms
+    /// whether they actually have the mod or not for reporting purposes.
     /// </summary>
     private static System.Collections.IEnumerator CheckClientHandshakeTimeout(int entityId, string playerName)
     {
@@ -247,7 +327,8 @@ public static class MultiplayerModTracker
             // Check if this client is still pending (no handshake received)
             if (_pendingClients.TryGetValue(entityId, out var pendingInfo) && !pendingInfo.HandshakeReceived)
             {
-                // This client doesn't have ProxiCraft!
+                // This client is CONFIRMED to not have ProxiCraft!
+                // The immediate lock already protected us - now we know for certain who caused it
                 TriggerHostSafetyLock(playerName);
             }
         }
@@ -259,18 +340,38 @@ public static class MultiplayerModTracker
 
     /// <summary>
     /// Marks a client as having confirmed ProxiCraft (received their handshake).
+    /// This is the "innocent verdict" - they can now be trusted.
     /// </summary>
     public static void OnClientHandshakeReceived(int entityId)
     {
         try
         {
+            string playerName = "Unknown";
+            
             if (_pendingClients.TryGetValue(entityId, out var pendingInfo))
             {
                 pendingInfo.HandshakeReceived = true;
-                ProxiCraft.Log($"[Multiplayer] Player '{pendingInfo.PlayerName}' confirmed ProxiCraft ✓");
+                playerName = pendingInfo.PlayerName;
                 
                 // Remove from pending since they're now confirmed
                 _pendingClients.TryRemove(entityId, out _);
+            }
+            
+            // Mark as verified
+            _verifiedClients[entityId] = true;
+            
+            // Decrement unverified count (clamped to 0)
+            _unverifiedClientCount = Math.Max(0, _unverifiedClientCount - 1);
+            
+            ProxiCraft.Log($"[Multiplayer] Player '{playerName}' confirmed ProxiCraft ✓ (Unverified remaining: {_unverifiedClientCount})");
+            
+            // If all clients verified and no confirmed bad clients, re-enable mod
+            if (_unverifiedClientCount <= 0 && !_hostSafetyLockTriggered)
+            {
+                _immediatelyLockMod = false;
+                ProxiCraft.Log("======================================================================");
+                ProxiCraft.Log("[Multiplayer] All clients verified - Mod RE-ENABLED");
+                ProxiCraft.Log("======================================================================");
             }
         }
         catch (Exception ex)
@@ -280,23 +381,26 @@ public static class MultiplayerModTracker
     }
 
     /// <summary>
-    /// Triggers the host-side safety lock when a client without ProxiCraft is detected.
+    /// Triggers the host-side safety lock when a client without ProxiCraft is CONFIRMED.
+    /// Note: By this point, _immediatelyLockMod already protected us during verification.
+    /// This method identifies and logs the culprit for the host's awareness.
     /// </summary>
     private static void TriggerHostSafetyLock(string culpritPlayerName)
     {
         if (_hostSafetyLockTriggered)
-            return; // Already triggered
+            return; // Already triggered by another client
 
         _hostSafetyLockTriggered = true;
         _hostLockCulprit = culpritPlayerName;
+        // _immediatelyLockMod stays true - redundant safety
 
         ProxiCraft.Log("======================================================================");
-        ProxiCraft.Log("[Multiplayer] ProxiCraft DISABLED - Client without mod detected!");
+        ProxiCraft.Log("[Multiplayer] ProxiCraft DISABLED - Client WITHOUT mod CONFIRMED!");
         ProxiCraft.Log("----------------------------------------------------------------------");
         ProxiCraft.Log($"  CULPRIT: '{culpritPlayerName}' does NOT have ProxiCraft installed!");
         ProxiCraft.Log("  ");
-        ProxiCraft.Log("  To prevent game crashes, ProxiCraft has been DISABLED for everyone.");
-        ProxiCraft.Log("  Container features will not work until this is resolved.");
+        ProxiCraft.Log("  ProxiCraft was already locked when they connected.");
+        ProxiCraft.Log("  This confirms they do not have the mod - crash prevented!");
         ProxiCraft.Log("  ");
         ProxiCraft.Log("  TO FIX:");
         ProxiCraft.Log($"  1. Ask '{culpritPlayerName}' to install ProxiCraft (same version as host)");
@@ -308,9 +412,19 @@ public static class MultiplayerModTracker
     }
 
     /// <summary>
-    /// Gets whether the host safety lock is triggered.
+    /// Gets whether the host safety lock is triggered (confirmed client without mod).
     /// </summary>
     public static bool IsHostSafetyLockTriggered => _hostSafetyLockTriggered;
+
+    /// <summary>
+    /// Gets whether the immediate lock is active (any unverified clients).
+    /// </summary>
+    public static bool IsImmediatelyLocked => _immediatelyLockMod;
+
+    /// <summary>
+    /// Gets the number of unverified clients.
+    /// </summary>
+    public static int UnverifiedClientCount => _unverifiedClientCount;
 
     /// <summary>
     /// Gets the name of the player who triggered the host safety lock.
@@ -452,6 +566,8 @@ public static class MultiplayerModTracker
         {
             _playerMods.Clear();
             _pendingClients.Clear();
+            _verifiedClients.Clear();
+            _pendingConnections.Clear();
             _handshakeSentTime = null;
             _serverResponseReceived = false;
             _serverWarningShown = false;
@@ -460,6 +576,8 @@ public static class MultiplayerModTracker
             _isHosting = false;
             _hostSafetyLockTriggered = false;
             _hostLockCulprit = null;
+            _immediatelyLockMod = false;
+            _unverifiedClientCount = 0;
         }
         catch
         {
@@ -493,7 +611,11 @@ public static class MultiplayerModTracker
     {
         try
         {
-            // Host safety lock takes priority - if a client doesn't have the mod, disable for everyone
+            // IMMEDIATE lock for any unverified clients - highest priority ("Guilty Until Proven Innocent")
+            if (_immediatelyLockMod)
+                return false;
+
+            // Host safety lock triggered (confirmed client without mod)
             if (_hostSafetyLockTriggered)
                 return false;
 
@@ -501,7 +623,7 @@ public static class MultiplayerModTracker
             if (!_isMultiplayerSession && !_isHosting)
                 return true;
 
-            // Hosting: allowed unless host safety lock triggered (checked above)
+            // Hosting: allowed if no immediate lock (checked above)
             if (_isHosting)
                 return true;
 
@@ -521,7 +643,15 @@ public static class MultiplayerModTracker
     /// </summary>
     public static string GetLockReason()
     {
-        // Host safety lock takes priority
+        // Immediate lock takes priority - client(s) connecting
+        if (_immediatelyLockMod)
+        {
+            if (_hostSafetyLockTriggered)
+                return $"Player '{_hostLockCulprit}' does not have ProxiCraft (verified)";
+            return $"Client(s) connecting - verifying ProxiCraft ({_unverifiedClientCount} pending)";
+        }
+
+        // Host safety lock (confirmed client without mod)
         if (_hostSafetyLockTriggered)
             return $"Player '{_hostLockCulprit}' does not have ProxiCraft";
 

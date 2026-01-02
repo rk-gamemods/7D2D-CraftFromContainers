@@ -197,8 +197,24 @@ Examples:
         Output($"  Mod Version: {ProxiCraft.MOD_VERSION}");
         Output($"  Enabled: {(config?.modEnabled == true ? "YES" : "NO")}");
         
-        // Show host-side safety lock status (takes priority)
-        if (MultiplayerModTracker.IsHostSafetyLockTriggered)
+        // Show immediate lock status (highest priority - "Guilty Until Proven Innocent")
+        if (MultiplayerModTracker.IsImmediatelyLocked)
+        {
+            if (MultiplayerModTracker.IsHostSafetyLockTriggered)
+            {
+                OutputWarning($"  Multiplayer: LOCKED - Player '{MultiplayerModTracker.HostLockCulprit}' CONFIRMED without ProxiCraft!");
+                Output($"    Mod disabled for all players to prevent crashes.");
+                Output($"    Ask '{MultiplayerModTracker.HostLockCulprit}' to install ProxiCraft or kick them.");
+            }
+            else
+            {
+                OutputWarning($"  Multiplayer: LOCKED - Verifying client(s)...");
+                Output($"    Unverified clients: {MultiplayerModTracker.UnverifiedClientCount}");
+                Output($"    Mod locked until all clients confirm ProxiCraft installation.");
+            }
+        }
+        // Show host-side safety lock status (confirmed bad client)
+        else if (MultiplayerModTracker.IsHostSafetyLockTriggered)
         {
             OutputWarning($"  Multiplayer: DISABLED - Player '{MultiplayerModTracker.HostLockCulprit}' missing ProxiCraft!");
             Output($"    Mod disabled for all players to prevent crashes.");
@@ -207,7 +223,7 @@ Examples:
         // Show hosting status
         else if (MultiplayerModTracker.IsHosting)
         {
-            Output($"  Multiplayer: HOSTING (tracking client mods)");
+            Output($"  Multiplayer: HOSTING (all clients verified ✓)");
         }
         // Show client-side multiplayer safety lock status
         else if (MultiplayerModTracker.IsMultiplayerSession)

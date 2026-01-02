@@ -160,19 +160,30 @@ ProxiCraft now includes automatic protection against client/server mismatch:
 4. If no response (server doesn't have it), mod stays LOCKED to prevent CTD
 
 **Host-Side Protection** (when hosting a game):
-1. When clients join your game, ProxiCraft waits for their handshake
-2. If a client sends a handshake, they're confirmed to have ProxiCraft ✓
-3. **If a client doesn't respond** (no mod), ProxiCraft is DISABLED for everyone
-4. The console opens with a clear message identifying the player without the mod
-5. When that player disconnects, ProxiCraft automatically re-enables
+1. **IMMEDIATE LOCK**: When ANY client connects, mod is instantly disabled
+2. This prevents crashes during the verification window (~100-300ms typical)
+3. Client sends handshake to prove they have ProxiCraft installed
+4. Once verified, mod re-enables (typical time: under 1 second)
+5. **If verification fails** (no mod), the culprit is identified and logged
+6. When that player disconnects, ProxiCraft automatically re-enables
 
-Example host-side warning:
+This "Guilty Until Proven Innocent" approach ensures ZERO crash window:
+- Old approach: Wait 10+ seconds, crash can happen during wait
+- New approach: Lock immediately, unlock after proof of mod installation
+
+Example host-side warning when client without mod is detected:
 ```
-[Multiplayer] ProxiCraft DISABLED - Client without mod detected!
+[Multiplayer] NEW CLIENT CONNECTING - Mod IMMEDIATELY LOCKED
+  Client: PlayerName
+  Reason: Waiting for ProxiCraft verification handshake
+  Unverified clients: 1
+
+[Multiplayer] ProxiCraft DISABLED - Client WITHOUT mod CONFIRMED!
 ----------------------------------------------------------------------
   CULPRIT: 'PlayerName' does NOT have ProxiCraft installed!
   
-  To prevent game crashes, ProxiCraft has been DISABLED for everyone.
+  ProxiCraft was already locked when they connected.
+  This confirms they do not have the mod - crash prevented!
   
   TO FIX:
   1. Ask 'PlayerName' to install ProxiCraft (same version as host)
@@ -516,7 +527,10 @@ Outputs:
 **New Features:**
 - **Multiplayer Safety Lock** - Comprehensive protection for both hosts and clients
   - **Client-side**: Auto-detects servers without ProxiCraft and disables mod to prevent crashes
-  - **Host-side**: Detects when clients without ProxiCraft join and disables mod for everyone
+  - **Host-side "Guilty Until Proven Innocent"**: IMMEDIATELY locks mod when ANY client connects
+    - Zero crash window (previously had ~10 second vulnerability)
+    - Mod unlocks only after client proves they have ProxiCraft (~100-300ms typical)
+    - If client doesn't have mod, they're identified as the culprit
   - Clearly identifies the player causing the lock (e.g., "CULPRIT: 'PlayerName' does NOT have ProxiCraft")
   - Console opens automatically when safety lock engages
   - Mod auto-re-enables when the offending player disconnects

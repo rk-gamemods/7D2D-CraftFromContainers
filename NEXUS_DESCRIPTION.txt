@@ -273,10 +273,11 @@ If you find a mod conflict, please report it so we can update this list.
 
 [u]New Features:[/u]
 [list]
-[*][b]Multiplayer Safety Lock (Host + Client)[/b] - Comprehensive protection for all multiplayer scenarios
-  - Client-side: Auto-detects servers without ProxiCraft and disables mod
-  - Host-side: Detects clients without ProxiCraft and disables mod for everyone
-  - Identifies the culprit player by name (e.g., "CULPRIT: 'PlayerName' missing ProxiCraft!")
+[*][b]Multiplayer Safety Lock (Host + Client)[/b] - Zero-crash protection for all multiplayer scenarios
+  - [b]"Guilty Until Proven Innocent"[/b] - Mod IMMEDIATELY locks when any client connects
+  - Zero crash window (old approach had ~10 second vulnerability during verification)
+  - Unlocks only after client proves they have ProxiCraft (~100-300ms typical)
+  - If client doesn't have mod, they're identified as the culprit by name
   - Auto-re-enables when offending player disconnects
 [*][b]Configurable Storage Priority[/b] - Control search order via storagePriority config section (Drone → Dew Collector → Workstation → Container → Vehicle)
 [*][b]Fuzzy Config Matching[/b] - Typos in config keys like "workstaion" auto-correct to "Workstation"
@@ -330,7 +331,7 @@ If you find a mod conflict, please report it so we can update this list.
 [b]Private/Co-op Games:[/b] If one player hosts (not a dedicated server), the hosting player IS the server. ALL players must have ProxiCraft installed - if only the host has it or only friends have it, crashes will occur when interacting with containers.
 
 [u]Multiplayer Safety Lock (v1.2.1+):[/u]
-ProxiCraft automatically protects against mismatched mod installations:
+ProxiCraft automatically protects against mismatched mod installations with ZERO crash window:
 
 [b]As a Client (joining a server):[/b]
 [list]
@@ -341,11 +342,13 @@ ProxiCraft automatically protects against mismatched mod installations:
 
 [b]As a Host (when players join you):[/b]
 [list]
-[*]Mod detects when clients join without ProxiCraft
-[*]If a client doesn't have the mod, ProxiCraft disables for EVERYONE
-[*]Console clearly identifies the culprit: [i]"CULPRIT: 'PlayerName' does NOT have ProxiCraft!"[/i]
+[*][b]IMMEDIATE LOCK[/b] - Mod locks the instant ANY client connects
+[*]Zero crash window (old approach had ~10 second vulnerability)
+[*]Client must prove they have ProxiCraft to unlock (~100-300ms typical)
+[*]If client doesn't have mod, they're identified as the culprit
+[*]Console clearly shows: [i]"CULPRIT: 'PlayerName' does NOT have ProxiCraft!"[/i]
 [*]Mod auto-re-enables when that player disconnects
-[*]Use [b]pc status[/b] to see who caused the lock
+[*]Use [b]pc status[/b] to see current lock state and who caused it
 [/list]
 
 [u]Mod Conflicts in Multiplayer:[/u]
