@@ -46,5 +46,14 @@
   "_multiplayerSafetyNote": "Crash prevention for multiplayer. Only disable on trusted/moderated servers!",
   "_multiplayerImmediateLockWarning": ">>> If false, CTD can occur if ANY player joins without ProxiCraft! <<<",
   "multiplayerImmediateLock": true,
-  "multiplayerHandshakeTimeoutSeconds": 10
+  "multiplayerHandshakeTimeoutSeconds": 10,
+
+  "_experimentalEnhancedSafetyNote": "EXPERIMENTAL: Advanced multiplayer safety for each feature. Default OFF. Enable if experiencing MP issues.",
+  "_enhancedSafetyWarning": ">>> These settings add extra MP safety checks but are NOT required for normal use. <<<",
+  "enhancedSafetyCrafting": false,
+  "enhancedSafetyReload": false,
+  "enhancedSafetyRepair": false,
+  "enhancedSafetyVehicle": false,
+  "enhancedSafetyRefuel": false,
+  "enhancedSafetyDiagnosticLogging": false
 }
