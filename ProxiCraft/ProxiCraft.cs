@@ -3122,7 +3122,23 @@ public class ProxiCraft : IModApi
         if (removed < count)
         {
             int remaining = count - removed;
-            int containerRemoved = ContainerManager.RemoveItems(Config, item, remaining);
+            
+            int containerRemoved;
+            if (Config.enhancedSafetyRefuel)
+            {
+                // Enhanced Safety mode: Check multiplayer safety first
+                if (!MultiplayerModTracker.IsModAllowed())
+                {
+                    LogDebug($"DecItemForGeneratorRefuel (enhanced): MP locked, skipping storage");
+                    return removed;
+                }
+                containerRemoved = ContainerManager.RemoveItems(Config, item, remaining);
+            }
+            else
+            {
+                // Legacy mode: Direct ContainerManager access
+                containerRemoved = ContainerManager.RemoveItems(Config, item, remaining);
+            }
             LogDebug($"Removed {containerRemoved} fuel from containers for generator");
             removed += containerRemoved;
         }
