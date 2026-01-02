@@ -34,6 +34,7 @@ A 7 Days to Die mod that allows crafting, reloading, refueling, and repairs usin
 - ✅ **Drone Storage** - Player's drone cargo
 - ✅ **Dew Collectors** - Water from dew collectors
 - ✅ **Workstation Outputs** - Items in forge/campfire/chemistry output slots
+- ✅ **Configurable Priority** - Control which storage types are searched first
 
 ### Reliability Features
 - ✅ **Startup Health Check** - Validates all features on load
@@ -41,6 +42,7 @@ A 7 Days to Die mod that allows crafting, reloading, refueling, and repairs usin
 - ✅ **Auto-Adaptation** - Attempts to recover from game updates
 - ✅ **Conflict Detection** - Warns about mod conflicts
 - ✅ **Graceful Degradation** - Features disable individually if broken
+- ✅ **Multiplayer Safety Lock** - Auto-disables on incompatible servers to prevent crashes
 
 ## Stability Philosophy
 
@@ -198,6 +200,22 @@ Edit `config.json` in the mod folder. The file is organized into sections:
   "pullFromWorkstationOutputs": true,
   "allowLockedContainers": true,
 
+  // Which container types to pull items from
+  "pullFromVehicles": true,
+  "pullFromDrones": true,
+  "pullFromDewCollectors": true,
+  "pullFromWorkstationOutputs": true,
+  "allowLockedContainers": true,
+
+  // Order to search storage sources (lower = checked first)
+  "storagePriority": {
+    "Drone": "1",
+    "DewCollector": "2",
+    "Workstation": "3",
+    "Container": "4",
+    "Vehicle": "5"
+  },
+
   // Core Features (STABLE - simple patches)
   "enableForCrafting": true,
   "enableForQuests": true,
@@ -212,10 +230,9 @@ Edit `config.json` in the mod folder. The file is organized into sections:
   "enableForTrader": true,
   "enableForGeneratorRefuel": true,
 
-  // New Features
+  // UI Features
   "enableHudAmmoCounter": true,
   "enableRecipeTrackerUpdates": true,
-  "enableTraderSelling": true,
   "respectLockedSlots": true
 }
 ```
@@ -228,9 +245,14 @@ Edit `config.json` in the mod folder. The file is organized into sections:
 | `isDebug` | false | Enable verbose logging (performance impact) |
 | `verboseHealthCheck` | false | Always show full health check output |
 | `range` | 15 | Search radius in blocks (-1 for unlimited) |
+| `pullFromVehicles` | true | Search vehicle storage bags |
+| `pullFromDrones` | true | Search drone cargo |
+| `pullFromDewCollectors` | true | Use water from dew collectors |
+| `pullFromWorkstationOutputs` | true | Count items in forge/campfire output |
+| `allowLockedContainers` | true | Search containers even if locked |
+| `storagePriority` | See config | Order to search storage types (Drone=1, DewCollector=2, Workstation=3, Container=4, Vehicle=5) |
 | `enableHudAmmoCounter` | true | Show container ammo in HUD stat bar |
 | `enableRecipeTrackerUpdates` | true | Live recipe tracker ingredient updates |
-| `enableTraderSelling` | true | Allow selling from containers to traders |
 | `respectLockedSlots` | true | Skip items in user-locked container slots |
 
 ### Range Guide
@@ -364,12 +386,35 @@ When you have a container/vehicle/workstation UI open, items are counted directl
 - No double-counting
 - Accurate challenge tracker updates
 
-## Multiplayer Status
+## Multiplayer Support
 
-**Untested in multiplayer.** The mod includes lock synchronization code but has not been validated in multiplayer environments.
+### ⚠️ Server Compatibility Requirement
 
-**Expected behavior:**
-- Should work when players use **separate containers** at different locations
+**ProxiCraft must be installed on BOTH the client and server** to work safely in multiplayer.
+
+**What happens if server doesn't have ProxiCraft:**
+- Mod automatically detects incompatible servers on connection
+- ProxiCraft disables itself to prevent crashes
+- Console opens automatically showing warning message:
+  ```
+  ⚠️ PROXICRAFT SAFETY LOCK ENGAGED ⚠️
+  Server does not have ProxiCraft installed.
+  ProxiCraft has been DISABLED to prevent crashes.
+  
+  TO FIX:
+  1. Install ProxiCraft on the server (same version as client)
+  2. OR if server runs Beyond Storage 2 or another container mod,
+     use that mod on your client instead - don't mix container mods.
+  ```
+
+**Why this is necessary:**
+- Client sees items in nearby containers
+- Server without ProxiCraft doesn't know about those items
+- Attempting to use those items causes state mismatch → crash
+- Safety lock prevents this by disabling the mod when incompatible
+
+**Expected behavior when both have ProxiCraft:**
+- Works safely when players use **separate containers** at different locations
 - May have issues with **shared storage** that multiple players access
 - Race conditions possible if players craft simultaneously from the same container
 
@@ -447,22 +492,27 @@ dotnet build -c Release
 
 Outputs:
 - `Release/ProxiCraft/` - The mod folder
-- `Release/ProxiCraft.zip` - Distribution package
+- `Release/ProxiCraft.zip` - Distribution package (latest)
+- `Release/ProxiCraft-1.2.1.zip` - Versioned release package
+
+**Note:** Version is controlled by `<ModVersion>` in ProxiCraft.csproj. Both zip files are created automatically during build.
 
 ## Changelog
 
 ### v1.2.1 - Storage Priority & Multiplayer Safety
 **New Features:**
-- Configurable storage priority - control which storage types are used first (Drone → Dew Collector → Workstation → Container → Vehicle)
-- Fuzzy config key matching - typos like "workstaion" auto-correct to "Workstation"
-- Multiplayer safety lock - mod auto-disables on servers without ProxiCraft to prevent CTD
-- Server detection notice - warns if connecting to incompatible server
-- Added `storagePriority` section to shipped config.json
+- **Multiplayer Safety Lock** - Auto-detects servers without ProxiCraft and disables mod to prevent crashes
+  - Console opens automatically when safety lock engages
+  - Clear warning message with fix instructions
+  - Prevents state mismatch crashes from container items
+- **Configurable Storage Priority** - Control search order: Drone → Dew Collector → Workstation → Container → Vehicle
+  - Fuzzy config key matching - typos like "workstaion" auto-correct to "Workstation"
+  - Added `storagePriority` section to shipped config.json
 
 **Bug Fixes:**
 - Vehicle repair with full inventory could lose repair kits - now checks inventory space before removing from storage
 - Fixed duplicate profiler timer calls for Vehicle/Drone counting (inflated call counts)
-- Removed obsolete `enableTraderSelling` from `pc config list` output
+- Removed obsolete `enableTraderSelling` from `pc config list` output (feature is always enabled)
 
 ### v1.2.0 - Features & Bug Fixes
 **New Features:**
