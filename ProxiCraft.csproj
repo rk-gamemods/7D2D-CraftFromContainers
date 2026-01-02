@@ -70,24 +70,24 @@
     </Reference>
   </ItemGroup>
 
-  <!-- Create release zips after build (both versioned and unversioned) -->
+  <!-- Create versioned release zip after build -->
   <Target Name="CreateReleaseZip" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <Delete Files="$(ProjectDir)Release\ProxiCraft.zip" Condition="Exists('$(ProjectDir)Release\ProxiCraft.zip')" />
     <Delete Files="$(ProjectDir)Release\ProxiCraft-$(ModVersion).zip" Condition="Exists('$(ProjectDir)Release\ProxiCraft-$(ModVersion).zip')" />
     
-    <!-- Create unversioned zip -->
-    <ZipDirectory SourceDirectory="$(ProjectDir)Release"
-                  DestinationFile="$(ProjectDir)ProxiCraft.zip"
-                  Overwrite="true" />
-    <Move SourceFiles="$(ProjectDir)ProxiCraft.zip" DestinationFiles="$(ProjectDir)Release\ProxiCraft.zip" />
+    <!-- Create temp staging folder with correct structure -->
+    <RemoveDir Directories="$(ProjectDir)_zip_staging" />
+    <MakeDir Directories="$(ProjectDir)_zip_staging\ProxiCraft" />
+    <Copy SourceFiles="$(ProjectDir)Release\ProxiCraft\ProxiCraft.dll;$(ProjectDir)Release\ProxiCraft\ModInfo.xml;$(ProjectDir)Release\ProxiCraft\config.json"
+          DestinationFolder="$(ProjectDir)_zip_staging\ProxiCraft" />
     
-    <!-- Create versioned zip -->
-    <ZipDirectory SourceDirectory="$(ProjectDir)Release"
-                  DestinationFile="$(ProjectDir)ProxiCraft-$(ModVersion).zip"
+    <!-- Create versioned zip with ProxiCraft/ folder inside -->
+    <ZipDirectory SourceDirectory="$(ProjectDir)_zip_staging"
+                  DestinationFile="$(ProjectDir)Release\ProxiCraft-$(ModVersion).zip"
                   Overwrite="true" />
-    <Move SourceFiles="$(ProjectDir)ProxiCraft-$(ModVersion).zip" DestinationFiles="$(ProjectDir)Release\ProxiCraft-$(ModVersion).zip" />
     
-    <Message Importance="High" Text="Created Release\ProxiCraft.zip (contains ProxiCraft/ folder)" />
-    <Message Importance="High" Text="Created Release\ProxiCraft-$(ModVersion).zip (versioned release)" />
+    <!-- Cleanup staging -->
+    <RemoveDir Directories="$(ProjectDir)_zip_staging" />
+    
+    <Message Importance="High" Text="Created Release\ProxiCraft-$(ModVersion).zip (contains ProxiCraft/ folder)" />
   </Target>
 </Project>
