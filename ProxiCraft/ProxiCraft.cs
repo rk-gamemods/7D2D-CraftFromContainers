@@ -3235,6 +3235,13 @@ public class ProxiCraft : IModApi
             if (!IsGameReady())
                 return;
 
+            // Enhanced Safety check at the top level
+            if (Config.enhancedSafetyVehicle && !MultiplayerModTracker.IsModAllowed())
+            {
+                LogDebug($"Vehicle repair (enhanced): MP locked, skipping storage pre-stage");
+                return;
+            }
+
             try
             {
                 // Resolve vehicle if not provided
