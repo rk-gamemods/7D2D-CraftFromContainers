@@ -41,5 +41,10 @@
   "_uiFeaturesNote": "Display features - show container items in the game UI",
   "enableHudAmmoCounter": true,
   "enableRecipeTrackerUpdates": true,
-  "respectLockedSlots": true
+  "respectLockedSlots": true,
+
+  "_multiplayerSafetyNote": "Crash prevention for multiplayer. Only disable on trusted/moderated servers!",
+  "_multiplayerImmediateLockWarning": ">>> If false, CTD can occur if ANY player joins without ProxiCraft! <<<",
+  "multiplayerImmediateLock": true,
+  "multiplayerHandshakeTimeoutSeconds": 10
 }

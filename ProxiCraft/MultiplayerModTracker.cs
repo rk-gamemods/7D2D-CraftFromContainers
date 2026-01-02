@@ -31,6 +31,11 @@ namespace ProxiCraft;
 /// - Only after ALL clients are verified does the mod re-enable
 /// - If timeout occurs before handshake, the offending player is identified
 /// - Mod auto-re-enables when all unverified clients disconnect
+/// 
+/// CONFIGURABLE SAFETY:
+/// - multiplayerImmediateLock (default: true) - Lock mod immediately when client connects
+/// - multiplayerHandshakeTimeoutSeconds (default: 10) - Timeout before confirming no mod
+/// - Set multiplayerImmediateLock=false only on trusted/moderated servers (honor system)
 /// </summary>
 public static class MultiplayerModTracker
 {
@@ -42,7 +47,10 @@ public static class MultiplayerModTracker
     private static DateTime? _handshakeSentTime;
     private static bool _serverResponseReceived;
     private static bool _serverWarningShown;
-    private const float SERVER_RESPONSE_TIMEOUT_SECONDS = 10f;
+    
+    // Configurable timeout - read from config, with fallback
+    private static float GetHandshakeTimeout() => 
+        Math.Max(3f, Math.Min(30f, ProxiCraft.Config?.multiplayerHandshakeTimeoutSeconds ?? 10f));
 
     // Host-side safety lock - "Guilty Until Proven Innocent"
     private static bool _isHosting;
@@ -50,6 +58,7 @@ public static class MultiplayerModTracker
     private static string _hostLockCulprit;            // Name of confirmed bad client
     private static bool _immediatelyLockMod;           // Lock active while ANY client unverified
     private static int _unverifiedClientCount;         // Number of clients pending verification
+    private static bool _immediateLockEnabled;         // Cached config setting for this session
     
     // Track pending and verified clients
     private static readonly ConcurrentDictionary<int, PendingClientInfo> _pendingClients = 
@@ -101,6 +110,11 @@ public static class MultiplayerModTracker
     #region Host-Side Safety Lock
 
     /// <summary>
+    /// Gets whether immediate lock is enabled (from config).
+    /// </summary>
+    public static bool IsImmediateLockConfigEnabled => _immediateLockEnabled;
+
+    /// <summary>
     /// Called when we start hosting a multiplayer game.
     /// Registers event handlers to track client joins.
     /// </summary>
@@ -117,14 +131,36 @@ public static class MultiplayerModTracker
             _verifiedClients.Clear();
             _pendingConnections.Clear();
             
+            // Cache config setting for this session
+            _immediateLockEnabled = ProxiCraft.Config?.multiplayerImmediateLock ?? true;
+            var timeoutSeconds = GetHandshakeTimeout();
+            
+            // LOG THE SAFETY SETTING PROMINENTLY - this helps diagnose CTD in logs
+            ProxiCraft.Log("======================================================================");
+            ProxiCraft.Log("[Multiplayer] HOST MODE STARTING - Safety Settings:");
+            ProxiCraft.Log($"  Immediate Client Lock: {(_immediateLockEnabled ? "ENABLED (safe)" : ">>> DISABLED <<< (honor system)")}");
+            ProxiCraft.Log($"  Handshake Timeout: {timeoutSeconds} seconds");
+            if (!_immediateLockEnabled)
+            {
+                ProxiCraft.Log("  ");
+                ProxiCraft.Log("  ⚠️ WARNING: Immediate lock is DISABLED!");
+                ProxiCraft.Log("  If a player joins WITHOUT ProxiCraft, the server may CRASH!");
+                ProxiCraft.Log("  Set multiplayerImmediateLock=true in config.json for safety.");
+            }
+            ProxiCraft.Log("======================================================================");
+            
             // Register for player spawn events (to get entityId correlation)
             ModEvents.PlayerSpawnedInWorld.RegisterHandler(OnPlayerSpawnedInWorld);
             ModEvents.PlayerDisconnected.RegisterHandler(OnPlayerDisconnectedEvent);
             
             // Register for EARLIEST client connection - IMMEDIATELY lock when any client connects
-            ConnectionManager.OnClientAdded += OnClientConnected;
+            // (only if immediate lock is enabled)
+            if (_immediateLockEnabled)
+            {
+                ConnectionManager.OnClientAdded += OnClientConnected;
+            }
             
-            ProxiCraft.LogDebug("[Multiplayer] Host mode enabled with IMMEDIATE safety lock");
+            ProxiCraft.LogDebug($"[Multiplayer] Host mode enabled - ImmediateLock={_immediateLockEnabled}");
         }
         catch (Exception ex)
         {
@@ -319,8 +355,9 @@ public static class MultiplayerModTracker
     /// </summary>
     private static System.Collections.IEnumerator CheckClientHandshakeTimeout(int entityId, string playerName)
     {
-        // Wait for timeout period
-        yield return new UnityEngine.WaitForSeconds(SERVER_RESPONSE_TIMEOUT_SECONDS + 2f);
+        // Wait for configurable timeout period (+ 2s buffer)
+        var timeoutSeconds = GetHandshakeTimeout() + 2f;
+        yield return new UnityEngine.WaitForSeconds(timeoutSeconds);
 
         try
         {
@@ -729,9 +766,9 @@ public static class MultiplayerModTracker
             if (!_handshakeSentTime.HasValue)
                 return false;
 
-            // Check if timeout exceeded
+            // Check if timeout exceeded (use configurable timeout)
             var elapsed = (DateTime.Now - _handshakeSentTime.Value).TotalSeconds;
-            if (elapsed < SERVER_RESPONSE_TIMEOUT_SECONDS)
+            if (elapsed < GetHandshakeTimeout())
                 return false;
 
             // Timeout! Show warning - mod stays LOCKED

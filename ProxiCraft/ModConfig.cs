@@ -112,6 +112,35 @@ public class ModConfig
     /// <summary>Enable real-time recipe tracker updates when container items change</summary>
     public bool enableRecipeTrackerUpdates = true;
 
+    // ===========================================
+    // MULTIPLAYER SAFETY - Crash prevention
+    // ===========================================
+
+    /// <summary>
+    /// Enable immediate safety lock when clients connect in multiplayer.
+    /// When true (default): Mod IMMEDIATELY locks when any client connects, unlocks after handshake.
+    /// When false: Trust that all clients have ProxiCraft (honor system - NOT RECOMMENDED).
+    /// 
+    /// WARNING: Setting this to false can cause server-wide CTD if ANY player joins without ProxiCraft!
+    /// Only disable on heavily-moderated servers where mod installation is enforced externally.
+    /// </summary>
+    public bool multiplayerImmediateLock = true;
+
+    /// <summary>
+    /// Timeout in seconds to wait for client handshake before confirming they don't have ProxiCraft.
+    /// Lower values = faster detection of non-ProxiCraft clients, but may false-positive on slow connections.
+    /// Default: 10 seconds (generous for slow connections).
+    /// Minimum: 3 seconds. Maximum: 30 seconds.
+    /// 
+    /// Note: This only affects how long until the "CULPRIT" message appears.
+    /// If multiplayerImmediateLock is true, the mod is already locked before this timeout.
+    /// </summary>
+    public float multiplayerHandshakeTimeoutSeconds = 10f;
+
+    // ===========================================
+    // DEPRECATED/REMOVED FEATURES
+    // ===========================================
+
     /// <summary>
     /// REMOVED: This feature was removed due to item duplication bugs.
     /// See TRADER_SELLING_POSTMORTEM.md for details.

@@ -192,6 +192,31 @@ Example host-side warning when client without mod is detected:
 
 Use `pc status` to check the current lock state and see who caused the lock.
 
+### Multiplayer Safety Configuration
+
+For **trusted modded servers** where you enforce mod installation externally (Discord rules, modpack, etc.), you can tune the safety settings in `config.json`:
+
+```json
+{
+  // Crash prevention - ONLY disable on trusted/moderated servers!
+  "multiplayerImmediateLock": true,       // false = honor system (NOT RECOMMENDED)
+  "multiplayerHandshakeTimeoutSeconds": 10 // 3-30 seconds
+}
+```
+
+⚠️ **WARNING**: Setting `multiplayerImmediateLock` to `false` removes crash protection. If ANY player joins without ProxiCraft, the server WILL crash. The setting is logged prominently when hosting:
+
+```
+[Multiplayer] HOST MODE STARTING - Safety Settings:
+  Immediate Client Lock: >>> DISABLED <<< (honor system)
+  Handshake Timeout: 10 seconds
+  
+  ⚠️ WARNING: Immediate lock is DISABLED!
+  If a player joins WITHOUT ProxiCraft, the server may CRASH!
+```
+
+This log entry appears in output_log.txt and helps diagnose CTD - if you see "DISABLED" followed by a crash 5 seconds later, you know why.
+
 ### Mod Conflicts in Multiplayer
 
 Do NOT mix different container mods between client and server:

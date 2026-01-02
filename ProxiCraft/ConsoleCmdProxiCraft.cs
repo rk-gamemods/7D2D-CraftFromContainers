@@ -223,7 +223,8 @@ Examples:
         // Show hosting status
         else if (MultiplayerModTracker.IsHosting)
         {
-            Output($"  Multiplayer: HOSTING (all clients verified ✓)");
+            var safetyStatus = MultiplayerModTracker.IsImmediateLockConfigEnabled ? "safety ON" : "⚠️ SAFETY OFF";
+            Output($"  Multiplayer: HOSTING (all clients verified ✓) [{safetyStatus}]");
         }
         // Show client-side multiplayer safety lock status
         else if (MultiplayerModTracker.IsMultiplayerSession)

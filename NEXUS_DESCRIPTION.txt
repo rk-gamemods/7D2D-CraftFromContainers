@@ -351,6 +351,14 @@ ProxiCraft automatically protects against mismatched mod installations with ZERO
 [*]Use [b]pc status[/b] to see current lock state and who caused it
 [/list]
 
+[u]Configurable Safety (for trusted servers):[/u]
+For servers with enforced modpacks, you can tune safety in config.json:
+[code]
+"multiplayerImmediateLock": true,        // false = honor system (risky!)
+"multiplayerHandshakeTimeoutSeconds": 10  // 3-30 seconds
+[/code]
+⚠️ Setting [b]multiplayerImmediateLock[/b] to false removes crash protection! The setting is logged prominently when hosting to help diagnose CTD - if the log shows "DISABLED" followed by a crash, you know why.
+
 [u]Mod Conflicts in Multiplayer:[/u]
 Do NOT mix different container mods between client and server:
 [list]
