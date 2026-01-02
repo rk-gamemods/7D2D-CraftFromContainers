@@ -2877,8 +2877,23 @@ public class ProxiCraft : IModApi
                     playerCount += data.holdingEntity.bag?.GetItemCount(itemValue) ?? 0;
                 }
 
-                // Check containers
-                int containerCount = ContainerManager.GetItemCount(Config, itemValue);
+                // Check containers - with Enhanced Safety check if enabled
+                int containerCount;
+                if (Config.enhancedSafetyRepair)
+                {
+                    // Enhanced Safety mode: Check multiplayer safety first
+                    if (!MultiplayerModTracker.IsModAllowed())
+                    {
+                        LogDebug($"CanRemoveRequiredResource (enhanced): MP locked, skipping storage check");
+                        return;
+                    }
+                    containerCount = ContainerManager.GetItemCount(Config, itemValue);
+                }
+                else
+                {
+                    // Legacy mode: Direct ContainerManager access
+                    containerCount = ContainerManager.GetItemCount(Config, itemValue);
+                }
                 int totalAvailable = playerCount + containerCount;
 
                 if (totalAvailable >= requiredCount)
@@ -2932,6 +2947,13 @@ public class ProxiCraft : IModApi
             // If vanilla succeeded or mod disabled, no need to intervene
             if (__result || !Config?.modEnabled == true || !Config?.enableForRepairAndUpgrade == true)
                 return;
+
+            // Enhanced Safety check at the top level
+            if (Config.enhancedSafetyRepair && !MultiplayerModTracker.IsModAllowed())
+            {
+                LogDebug($"RemoveRequiredResource (enhanced): MP locked, skipping storage removal");
+                return;
+            }
 
             try
             {
