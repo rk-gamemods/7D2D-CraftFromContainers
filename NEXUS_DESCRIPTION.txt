@@ -108,7 +108,7 @@ ProxiCraft includes experimental multiplayer support with automatic crash protec
 
 [b]For crashes (CTD):[/b]
 [list=1]
-[*]Find [b]output_log.txt[/b] in [b]%APPDATA%\..\LocalLow\The Fun Pimps\7 Days To Die\[/b]
+[*]Find [b]output_log.txt[/b] in [b]%APPDATA%\7DaysToDie\logs\[/b]
 [*]Also grab [b]network_log.txt[/b] and [b]pc_debug.log[/b] from your ProxiCraft mod folder
 [*]Attach these files to your GitHub issue or Nexus comment
 [/list]

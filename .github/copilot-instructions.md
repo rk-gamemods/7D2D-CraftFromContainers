@@ -540,7 +540,7 @@ QueryDb.exe callgraph_full.db search "NetPackageTileEntity"
 
 ### Debugging Tips
 1. Use `pc fullcheck` for comprehensive diagnostics
-2. Check `output_log.txt` in game folder for errors
+2. Check `output_log.txt` in `%APPDATA%\7DaysToDie\logs\` for errors
 3. Enable `isDebug: true` in config.json for verbose logging
 4. Use `pc perf on` to profile performance issues
 
