@@ -1100,16 +1100,17 @@ public static class StartupHealthCheck
             ""
         };
 
-        // Group results by category
+        // Group results by category - must include ALL FeatureIds used in AddResult calls
         var featureGroups = new Dictionary<string, List<FeatureCheckResult>>
         {
-            { "Crafting", Results.Where(r => r.FeatureId.Contains("Craft") || r.FeatureId == "Repair").ToList() },
-            { "Reload", Results.Where(r => r.FeatureId == "Reload").ToList() },
+            { "Crafting", Results.Where(r => r.FeatureId.Contains("Craft") || r.FeatureId == "Repair" || r.FeatureId == "RecipeTracker").ToList() },
+            { "Reload", Results.Where(r => r.FeatureId == "Reload" || r.FeatureId == "HudAmmoCounter").ToList() },
             { "Refuel", Results.Where(r => r.FeatureId.Contains("Refuel")).ToList() },
-            { "Trader", Results.Where(r => r.FeatureId == "Trader").ToList() },
+            { "Trader", Results.Where(r => r.FeatureId == "Trader" || r.FeatureId == "TraderSelling").ToList() },
             { "Quests", Results.Where(r => r.FeatureId == "Quests").ToList() },
             { "Painting", Results.Where(r => r.FeatureId == "Painting").ToList() },
-            { "Other Features", Results.Where(r => r.FeatureId == "Lockpicking" || r.FeatureId == "ItemRepair").ToList() },
+            { "Other Features", Results.Where(r => r.FeatureId == "Lockpicking" || r.FeatureId == "ItemRepair" || 
+                r.FeatureId == "VehicleRepair" || r.FeatureId == "LockedSlots").ToList() },
             { "Storage Sources", Results.Where(r => r.FeatureId == "Vehicles" || r.FeatureId == "Drones" ||
                 r.FeatureId == "DewCollectors" || r.FeatureId == "Workstations").ToList() },
             { "System", Results.Where(r => r.FeatureId == "HarmonyPatches").ToList() }
