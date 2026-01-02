@@ -207,7 +207,7 @@ Edit `config.json` in the mod folder. The file is organized into sections:
   "pullFromWorkstationOutputs": true,
   "allowLockedContainers": true,
 
-  // Order to search storage sources (lower = checked first)
+  // Order to search storage sources (lower = checked first), Player inventory always first
   "storagePriority": {
     "Drone": "1",
     "DewCollector": "2",
@@ -512,7 +512,7 @@ Outputs:
 **Bug Fixes:**
 - Vehicle repair with full inventory could lose repair kits - now checks inventory space before removing from storage
 - Fixed duplicate profiler timer calls for Vehicle/Drone counting (inflated call counts)
-- Removed obsolete `enableTraderSelling` from `pc config list` output (feature is always enabled)
+- Removed obsolete `enableTraderSelling` from `pc config list` output
 
 ### v1.2.0 - Features & Bug Fixes
 **New Features:**
