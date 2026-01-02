@@ -208,7 +208,14 @@ Use only ONE mod of this type.
 [list]
 [*]HUD ammo counter
 [*]Locked slot respect
-[*]Fixed reload, upgrade, and workstation bugs
+[*]Bug fixes:
+  [list]
+  [*]Radial menu reload - ammo greyed out when only in containers [i](reported by falkon311)[/i]
+  [*]R-key reload blocked when ammo only in containers [i](reported by falkon311)[/i]
+  [*]Block upgrades not consuming materials from containers [i](reported by falkon311)[/i]
+  [*]Workstation output items counted but not consumed [i](reported by Kaizlin)[/i]
+  [*]"Take Like" taking all container contents instead of matching items [i](reported by Kaizlin)[/i]
+  [/list]
 [/list]
 
 [b]v1.1.0[/b]
