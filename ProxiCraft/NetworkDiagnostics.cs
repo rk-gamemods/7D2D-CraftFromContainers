@@ -354,14 +354,18 @@ public static class NetworkDiagnostics
 
 /// <summary>
 /// Harmony patches to observe network packet processing.
+/// 
+/// NOTE: Disabled by default - NetPackage.ProcessPackage is abstract/virtual and 
+/// cannot be directly patched. This class is kept for reference but not auto-patched.
+/// For packet debugging, use the console commands instead.
 ///
-/// STABILITY GUARANTEES:
+/// STABILITY GUARANTEES (if enabled):
 /// - Postfix pattern: runs AFTER original method, cannot break it
 /// - All code wrapped in try-catch with empty catch
 /// - Finalizer only logs, never modifies exception flow
 /// - Returns original exception unchanged
 /// </summary>
-[HarmonyPatch]
+// [HarmonyPatch] - Disabled: ProcessPackage is abstract, cannot patch base class
 public static class NetworkPacketObserver
 {
     [HarmonyPatch(typeof(NetPackage), nameof(NetPackage.ProcessPackage))]
