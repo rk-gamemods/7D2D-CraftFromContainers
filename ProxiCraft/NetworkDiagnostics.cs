@@ -355,53 +355,38 @@ public static class NetworkDiagnostics
 /// <summary>
 /// Harmony patches to observe network packet processing.
 /// 
-/// NOTE: Disabled by default - NetPackage.ProcessPackage is abstract/virtual and 
-/// cannot be directly patched. This class is kept for reference but not auto-patched.
-/// For packet debugging, use the console commands instead.
+/// Patches ConnectionManager.ProcessPackages which is where all network packets
+/// are dispatched. This allows us to detect packets from conflicting mods.
 ///
-/// STABILITY GUARANTEES (if enabled):
-/// - Postfix pattern: runs AFTER original method, cannot break it
+/// STABILITY GUARANTEES:
+/// - Prefix pattern: observes packets before processing, cannot break it
 /// - All code wrapped in try-catch with empty catch
-/// - Finalizer only logs, never modifies exception flow
-/// - Returns original exception unchanged
+/// - Only active in multiplayer (ConnectionManager only used in MP)
 /// </summary>
-// [HarmonyPatch] - Disabled: ProcessPackage is abstract, cannot patch base class
+[HarmonyPatch(typeof(ConnectionManager), "ProcessPackages")]
 public static class NetworkPacketObserver
 {
-    [HarmonyPatch(typeof(NetPackage), nameof(NetPackage.ProcessPackage))]
-    [HarmonyPostfix]
-    public static void NetPackage_ProcessPackage_Postfix(NetPackage __instance)
+    [HarmonyPrefix]
+    public static void Prefix(List<NetPackage> ___packagesToProcess)
     {
         // Entire body wrapped - cannot throw
         try
         {
-            NetworkDiagnostics.OnPacketObserved(__instance);
+            // Only observe if we have packets and diagnostics is initialized
+            if (___packagesToProcess == null || ___packagesToProcess.Count == 0)
+                return;
+
+            foreach (var packet in ___packagesToProcess)
+            {
+                if (packet != null)
+                {
+                    NetworkDiagnostics.OnPacketObserved(packet);
+                }
+            }
         }
         catch
         {
             // Swallow everything - this patch must never disrupt packet processing
         }
-    }
-
-    [HarmonyPatch(typeof(NetPackage), nameof(NetPackage.ProcessPackage))]
-    [HarmonyFinalizer]
-    public static Exception NetPackage_ProcessPackage_Finalizer(NetPackage __instance, Exception __exception)
-    {
-        // Only act if there was an exception to log
-        if (__exception != null && __instance != null)
-        {
-            try
-            {
-                NetworkDiagnostics.OnPacketException(__instance, __exception);
-            }
-            catch
-            {
-                // Swallow - never interfere with exception handling
-            }
-        }
-
-        // CRITICAL: Always return the original exception unchanged
-        // This ensures we never swallow or modify the game's exception handling
-        return __exception;
     }
 }
