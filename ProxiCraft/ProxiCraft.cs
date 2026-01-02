@@ -1512,7 +1512,23 @@ public class ProxiCraft : IModApi
                 var ammoItemValue = ItemClass.GetItem(__instance.MagazineItemNames[holdingItemItemValue.SelectedAmmoTypeIndex]);
                 
                 // Check if we have ammo in nearby containers
-                int containerCount = ContainerManager.GetItemCount(Config, ammoItemValue);
+                int containerCount;
+                if (Config.enhancedSafetyReload)
+                {
+                    // Enhanced Safety mode: Use VirtualInventoryProvider with MP safety checks
+                    // Note: VirtualInventoryProvider.GetTotalItemCount returns bag+toolbelt+storage,
+                    // so we need to subtract what the player already has (vanilla already checked that)
+                    var player = GameManager.Instance?.World?.GetPrimaryPlayer();
+                    int totalCount = VirtualInventoryProvider.GetTotalItemCount(player, ammoItemValue);
+                    int playerCount = player?.bag?.GetItemCount(ammoItemValue) ?? 0;
+                    playerCount += player?.inventory?.GetItemCount(ammoItemValue) ?? 0;
+                    containerCount = totalCount - playerCount;
+                }
+                else
+                {
+                    // Legacy mode: Direct ContainerManager access
+                    containerCount = ContainerManager.GetItemCount(Config, ammoItemValue);
+                }
                 
                 if (containerCount > 0)
                 {
@@ -1603,9 +1619,30 @@ public class ProxiCraft : IModApi
         if (!Config?.modEnabled == true || !Config?.enableForReload == true)
             return inventoryCount;
 
-        int result = GetTotalItemCount(inventoryCount, ammoItem);
-        LogDebug($"AddReloadContainerCount: returning {result}");
-        return result;
+        if (Config.enhancedSafetyReload)
+        {
+            // Enhanced Safety mode: Use VirtualInventoryProvider with MP safety checks
+            var player = GameManager.Instance?.World?.GetPrimaryPlayer();
+            // VirtualInventoryProvider.GetTotalItemCount returns the TOTAL (inventory + storage)
+            // Since inventoryCount was already calculated, we add storage count on top
+            int storageCount = ContainerManager.GetItemCount(Config, ammoItem);
+            // But we need to check multiplayer safety first
+            if (!MultiplayerModTracker.IsModAllowed())
+            {
+                LogDebug($"AddReloadContainerCount (enhanced): MP locked, returning {inventoryCount}");
+                return inventoryCount;
+            }
+            int result = inventoryCount + storageCount;
+            LogDebug($"AddReloadContainerCount (enhanced): returning {result}");
+            return result;
+        }
+        else
+        {
+            // Legacy mode: Direct ContainerManager access
+            int result = GetTotalItemCount(inventoryCount, ammoItem);
+            LogDebug($"AddReloadContainerCount: returning {result}");
+            return result;
+        }
     }
 
     /// <summary>
@@ -1629,7 +1666,25 @@ public class ProxiCraft : IModApi
         {
             int remaining = count - removed;
             LogDebug($"DecItemForReload: Need {remaining} more from containers");
-            int containerRemoved = ContainerManager.RemoveItems(Config, item, remaining);
+            
+            int containerRemoved;
+            if (Config.enhancedSafetyReload)
+            {
+                // Enhanced Safety mode: Use VirtualInventoryProvider with MP safety checks
+                // Note: We already removed from inventory, so just need storage portion
+                // Check multiplayer safety first
+                if (!MultiplayerModTracker.IsModAllowed())
+                {
+                    LogDebug($"DecItemForReload (enhanced): MP locked, skipping storage");
+                    return removed;
+                }
+                containerRemoved = ContainerManager.RemoveItems(Config, item, remaining);
+            }
+            else
+            {
+                // Legacy mode: Direct ContainerManager access
+                containerRemoved = ContainerManager.RemoveItems(Config, item, remaining);
+            }
             LogDebug($"Removed {containerRemoved} ammo from containers for reload");
             removed += containerRemoved;
         }
