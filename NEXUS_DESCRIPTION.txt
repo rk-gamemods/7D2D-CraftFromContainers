@@ -106,9 +106,9 @@ ProxiCraft includes experimental multiplayer support with automatic crash protec
 
 [b]🐛 Please Report Bugs![/b] Multiplayer has many edge cases. If you encounter issues:
 [list=1]
-[*]Run [b]pc fullcheck[/b] in console
-[*]Copy the output
-[*]Report on GitHub or Nexus comments
+[*]Run [b]pc fullcheck[/b] in console (F1)
+[*]Find [b]fullcheck_report.txt[/b] in your ProxiCraft mod folder
+[*]Attach that file to your GitHub or Nexus comment
 [/list]
 
 Your reports help make multiplayer stable for everyone!

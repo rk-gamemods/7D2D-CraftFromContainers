@@ -96,7 +96,7 @@ ProxiCraft includes experimental multiplayer support with automatic crash protec
 - High-latency connections ⚠️ (needs more testing)
 - Large player counts (8+) ⚠️ (needs more testing)
 
-**🐛 Please Report Bugs!** Multiplayer has many edge cases. Run `pc fullcheck` and report the output on GitHub or Nexus.
+**🐛 Please Report Bugs!** Multiplayer has many edge cases. Run `pc fullcheck` - it saves `fullcheck_report.txt` to the mod folder. Attach that file to your report on GitHub or Nexus.
 
 ---
 
@@ -177,7 +177,7 @@ Open console with F1:
 | `pc status` | Show mod status, config, and multiplayer state |
 | `pc health` | Show startup health check results |
 | `pc test` | Test container scanning (shows what's found) |
-| `pc fullcheck` | Full diagnostic for bug reports |
+| `pc fullcheck` | Full diagnostic (saves to `fullcheck_report.txt`) |
 | `pc conflicts` | Check for mod conflicts |
 | `pc toggle` | Enable/disable mod temporarily |
 | `pc reload` | Reload config from file |
@@ -200,7 +200,7 @@ pc config save              # Save changes to file
 1. **Check status:** `pc status` - Is mod enabled?
 2. **Check health:** `pc health` - Are features working?
 3. **Test scanning:** `pc test` - Can mod see containers?
-4. **Full report:** `pc fullcheck` - Copy for bug reports
+4. **Full report:** `pc fullcheck` - Saves `fullcheck_report.txt` for bug reports
 
 ### Multiplayer Issues
 
@@ -209,7 +209,7 @@ pc config save              # Save changes to file
 | "Multiplayer: LOCKED" in `pc status` | A player doesn't have ProxiCraft installed. Check who. |
 | Features don't work for some players | Ensure ALL players have same mod version |
 | Settings different than expected | Server settings override client. Check server's config.json |
-| CTD on player join | Run `pc fullcheck`, report the output |
+| CTD on player join | Run `pc fullcheck`, attach `fullcheck_report.txt` |
 
 ---
 
