@@ -260,9 +260,16 @@ dotnet build -c Release
 
 ---
 
-## Inspiration
+## Inspiration & Prior Art
 
-ProxiCraft builds on concepts from [CraftFromContainers by aedenthorn](https://www.nexusmods.com/7daystodie/mods/2196). If you want the original, check out their mod.
+ProxiCraft builds on concepts from these mods:
+
+| Mod | Author | Notes |
+|-----|--------|-------|
+| [CraftFromContainers](https://www.nexusmods.com/7daystodie/mods/2196) | aedenthorn | Original concept for A20 |
+| [BeyondStorage2](https://www.nexusmods.com/7daystodie/mods/5674) | SphereII | Expanded features, storage priority |
+
+If you prefer their versions, check them out! ProxiCraft is a from-scratch implementation with different architecture.
 
 **Use only ONE craft-from-containers mod.** Remove CraftFromContainers, BeyondStorage2, or similar mods before using ProxiCraft.
 

@@ -230,9 +230,15 @@ Use only ONE mod of this type.
 
 [line]
 
-[size=4][b]Inspiration[/b][/size]
+[size=4][b]Inspiration & Prior Art[/b][/size]
 
-Built on concepts from [url=https://www.nexusmods.com/7daystodie/mods/2196]CraftFromContainers by aedenthorn[/url].
+ProxiCraft builds on concepts from:
+[list]
+[*][url=https://www.nexusmods.com/7daystodie/mods/2196]CraftFromContainers[/url] by aedenthorn - Original concept for A20
+[*][url=https://www.nexusmods.com/7daystodie/mods/5674]BeyondStorage2[/url] by SphereII - Expanded features, storage priority
+[/list]
+
+If you prefer their versions, check them out! ProxiCraft is a from-scratch implementation with different architecture.
 
 [line]
 
