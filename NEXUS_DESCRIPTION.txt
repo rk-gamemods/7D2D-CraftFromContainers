@@ -198,7 +198,7 @@ Use only ONE mod of this type.
 
 [b]v1.2.1[/b]
 [list]
-[*]🧪 EXPERIMENTAL Multiplayer support with automatic safety protection
+[*]🧪 EXPERIMENTAL Multiplayer support with automatic safety protection [i](reported by GreenGhost21, optimus0, GeeButtersnaps)[/i]
 [*]Server config sync - clients use server's settings
 [*]Configurable storage priority
 [*]Bug fixes for pc help, vehicle repair, profiler

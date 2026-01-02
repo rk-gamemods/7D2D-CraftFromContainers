@@ -2,6 +2,8 @@
 
 A 7 Days to Die mod that allows crafting, reloading, refueling, and repairs using items from nearby storage containers.
 
+**[Nexus Mods](https://www.nexusmods.com/7daystodie/mods/9269)** • **[GitHub](https://github.com/rk-gamemods/7D2D-ProxiCraft)**
+
 ## ⬇️ [Download ProxiCraft-1.2.1.zip](https://github.com/rk-gamemods/7D2D-ProxiCraft/raw/master/Release/ProxiCraft-1.2.1.zip)
 
 ---
@@ -281,7 +283,7 @@ If you prefer their versions, check them out! ProxiCraft is a from-scratch imple
 
 **New:**
 - 🧪 **EXPERIMENTAL Multiplayer Support** with Virtual Inventory architecture
-- **Zero-Crash Protection** - "Guilty Until Proven Innocent" instant lock on client connect
+- **Zero-Crash Protection** - "Guilty Until Proven Innocent" instant lock on client connect *(GreenGhost21, optimus0, GeeButtersnaps)*
 - **Server Config Sync** - Clients use server's settings automatically
 - **Configurable Storage Priority** - Control search order
 

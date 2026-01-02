@@ -60,6 +60,10 @@ ProxiCraft is a 7 Days to Die mod that allows players to use items from nearby s
 **Game Version:** 7 Days to Die V2.5 (tested)  
 **Framework:** .NET 4.8, C# 12, Harmony 2.x
 
+**Links:**
+- **Nexus Mods:** https://www.nexusmods.com/7daystodie/mods/9269
+- **GitHub:** https://github.com/rk-gamemods/7D2D-ProxiCraft
+
 ---
 
 ## Workspace Structure
