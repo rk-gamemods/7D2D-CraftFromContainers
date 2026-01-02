@@ -139,6 +139,11 @@ The profiler tracks timing for container scans, item counting, and cache operati
 
 **IMPORTANT:** ProxiCraft must be installed on BOTH client AND server for multiplayer games.
 
+**This includes private/co-op games** where one player hosts:
+- The hosting player IS the server
+- ALL players (host + friends) must have ProxiCraft installed
+- If only the host has it (or only friends have it), crashes will occur
+
 If only the client has ProxiCraft:
 - The server doesn't know about items in containers
 - Crafting/reloading may fail or cause crashes (CTD)

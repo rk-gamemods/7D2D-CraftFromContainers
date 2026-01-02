@@ -323,6 +323,8 @@ If you find a mod conflict, please report it so we can update this list.
 
 [b]IMPORTANT:[/b] ProxiCraft must be installed on BOTH client AND server for multiplayer games.
 
+[b]Private/Co-op Games:[/b] If one player hosts (not a dedicated server), the hosting player IS the server. ALL players must have ProxiCraft installed - if only the host has it or only friends have it, crashes will occur when interacting with containers.
+
 [u]If server doesn't have ProxiCraft:[/u]
 [list]
 [*]Mod automatically detects incompatible server on connection
