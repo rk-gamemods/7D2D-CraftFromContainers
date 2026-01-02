@@ -56,7 +56,7 @@ The toolkit provides:
 
 ProxiCraft is a 7 Days to Die mod that allows players to use items from nearby storage containers for crafting, reloading, refueling, and more. It uses Harmony patching to modify game behavior at runtime.
 
-**Current Version:** 1.2.1  
+**Current Version:** 1.2.2  
 **Game Version:** 7 Days to Die V2.5 (tested)  
 **Framework:** .NET 4.8, C# 12, Harmony 2.x
 

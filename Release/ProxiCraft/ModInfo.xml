@@ -4,6 +4,6 @@
 	<DisplayName value="ProxiCraft - Proximity Container Crafting" />
 	<Description value="Craft, reload, refuel, paint, lockpick, and repair using items from nearby containers. Supports: storage containers, vehicle bags, drone cargo, dew collectors, and workstation outputs. Features: Challenge tracker integration, startup health check, auto-adaptation to game updates, balanced 15-block default range, real-time updates, and robust error handling." />
 	<Author value="rk-gamemods" />
-	<Version value="1.2.1" />
+	<Version value="1.2.2" />
 	<Website value="https://github.com/rk-gamemods/7D2D-ProxiCraft" />
 </xml>

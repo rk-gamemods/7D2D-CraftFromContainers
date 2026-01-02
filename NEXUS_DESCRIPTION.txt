@@ -196,6 +196,11 @@ Use only ONE mod of this type.
 
 [size=4][b]Changelog[/b][/size]
 
+[b]v1.2.2[/b]
+[list]
+[*]Fixed: Health check report now shows all features in grouped output
+[/list]
+
 [b]v1.2.1[/b]
 [list]
 [*]🧪 EXPERIMENTAL Multiplayer support with automatic safety protection [i](reported by GreenGhost21, optimus0, GeeButtersnaps)[/i]
