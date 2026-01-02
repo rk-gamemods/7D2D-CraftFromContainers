@@ -213,16 +213,43 @@ public class ProxiCraft : IModApi
         if (!SingletonMonoBehaviour<ConnectionManager>.Instance.IsConnected)
             yield break;
 
-        // Check if this is truly multiplayer (not just single-player with network init)
-        bool isMultiplayer = !SingletonMonoBehaviour<ConnectionManager>.Instance.IsServer ||
-                             SingletonMonoBehaviour<ConnectionManager>.Instance.ClientCount() > 0;
+        bool isServer = SingletonMonoBehaviour<ConnectionManager>.Instance.IsServer;
+        bool isSinglePlayer = SingletonMonoBehaviour<ConnectionManager>.Instance.IsSinglePlayer;
 
-        if (!isMultiplayer)
+        // True single-player: no network handling needed
+        if (isSinglePlayer)
         {
-            LogDebug("Single-player or local host detected - no multiplayer safety lock needed");
+            LogDebug("Single-player detected - no multiplayer handling needed");
             yield break;
         }
 
+        // If we're the server/host, enable host-side safety lock
+        if (isServer)
+        {
+            LogDebug("Hosting multiplayer game - enabling host-side client tracking");
+            MultiplayerModTracker.OnStartHosting();
+            
+            // Host still sends handshake so clients know the server has ProxiCraft
+            var player = GameManager.Instance?.World?.GetPrimaryPlayer();
+            if (player != null)
+            {
+                var localConflicts = ModCompatibility.GetConflicts()
+                    .Select(c => c.ModName)
+                    .ToList();
+
+                var packet = NetPackageManager.GetPackage<NetPackagePCHandshake>()
+                    .Setup(player.entityId, player.PlayerDisplayName, MOD_NAME, MOD_VERSION, localConflicts);
+
+                LogDebug($"Host broadcasting ProxiCraft presence: {MOD_NAME} v{MOD_VERSION}");
+                
+                // Broadcast to all connected clients
+                SingletonMonoBehaviour<ConnectionManager>.Instance.SendPackage(
+                    (NetPackage)(object)packet, false, -1, -1, -1, null, 192, false);
+            }
+            yield break;
+        }
+
+        // We're a client joining a server - enable client-side safety lock
         try
         {
             var player = GameManager.Instance?.World?.GetPrimaryPlayer();

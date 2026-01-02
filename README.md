@@ -153,25 +153,33 @@ If only the client has ProxiCraft:
 
 ProxiCraft now includes automatic protection against client/server mismatch:
 
-1. **When joining a server**, mod functionality is temporarily LOCKED
-2. **Client sends a handshake** to check if server has ProxiCraft
-3. **If server responds** (has ProxiCraft), mod is UNLOCKED and works normally
-4. **If no response** (server doesn't have it), mod stays LOCKED to prevent CTD
+**Client-Side Protection** (when joining a server):
+1. Mod functionality is temporarily LOCKED when you join
+2. Client sends a handshake to check if server has ProxiCraft
+3. If server responds (has ProxiCraft), mod is UNLOCKED and works normally
+4. If no response (server doesn't have it), mod stays LOCKED to prevent CTD
 
-You'll see messages in the console:
+**Host-Side Protection** (when hosting a game):
+1. When clients join your game, ProxiCraft waits for their handshake
+2. If a client sends a handshake, they're confirmed to have ProxiCraft ✓
+3. **If a client doesn't respond** (no mod), ProxiCraft is DISABLED for everyone
+4. The console opens with a clear message identifying the player without the mod
+5. When that player disconnects, ProxiCraft automatically re-enables
+
+Example host-side warning:
 ```
-[Multiplayer] Joined server - mod functionality locked until server confirmation
-[Multiplayer] Server confirmed ProxiCraft - mod functionality UNLOCKED
+[Multiplayer] ProxiCraft DISABLED - Client without mod detected!
+----------------------------------------------------------------------
+  CULPRIT: 'PlayerName' does NOT have ProxiCraft installed!
+  
+  To prevent game crashes, ProxiCraft has been DISABLED for everyone.
+  
+  TO FIX:
+  1. Ask 'PlayerName' to install ProxiCraft (same version as host)
+  2. OR kick 'PlayerName' - mod will re-enable when they leave
 ```
 
-Or if server doesn't have ProxiCraft:
-```
-[Multiplayer] ProxiCraft DISABLED - Server does not have it installed
-  To prevent crashes, ProxiCraft functionality is DISABLED.
-  You can still play, but container features won't work.
-```
-
-Use `pc status` to check the current lock state.
+Use `pc status` to check the current lock state and see who caused the lock.
 
 ### Mod Conflicts in Multiplayer
 
@@ -506,10 +514,12 @@ Outputs:
 
 ### v1.2.1 - Storage Priority & Multiplayer Safety
 **New Features:**
-- **Multiplayer Safety Lock** - Auto-detects servers without ProxiCraft and disables mod to prevent crashes
+- **Multiplayer Safety Lock** - Comprehensive protection for both hosts and clients
+  - **Client-side**: Auto-detects servers without ProxiCraft and disables mod to prevent crashes
+  - **Host-side**: Detects when clients without ProxiCraft join and disables mod for everyone
+  - Clearly identifies the player causing the lock (e.g., "CULPRIT: 'PlayerName' does NOT have ProxiCraft")
   - Console opens automatically when safety lock engages
-  - Clear warning message with fix instructions
-  - Prevents state mismatch crashes from container items
+  - Mod auto-re-enables when the offending player disconnects
 - **Configurable Storage Priority** - Control search order: Drone → Dew Collector → Workstation → Container → Vehicle
   - Fuzzy config key matching - typos like "workstaion" auto-correct to "Workstation"
   - Added `storagePriority` section to shipped config.json
