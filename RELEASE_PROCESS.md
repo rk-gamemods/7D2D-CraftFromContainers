@@ -63,11 +63,11 @@ Update version in **6 files** (replace `X.Y.Z` with actual new version):
 **Line 7**: Download link  
 **Change**: 
 ```markdown
-[**Download v1.2.2**](https://github.com/rk-gamemods/7D2D-ProxiCraft/releases/download/v1.2.2/ProxiCraft-1.2.2.zip)
+[**Download v1.2.2**](https://github.com/rk-gamemods/7D2D-ProxiCraft/raw/master/Release/ProxiCraft-1.2.2.zip)
 ```
 to:
 ```markdown
-[**Download vX.Y.Z**](https://github.com/rk-gamemods/7D2D-ProxiCraft/releases/download/vX.Y.Z/ProxiCraft-X.Y.Z.zip)
+[**Download vX.Y.Z**](https://github.com/rk-gamemods/7D2D-ProxiCraft/raw/master/Release/ProxiCraft-X.Y.Z.zip)
 ```
 
 **Note**: If there's a version badge/shield near the top, update that too.
@@ -250,29 +250,29 @@ git push origin vX.Y.Z
 - Visit `https://github.com/rk-gamemods/7D2D-ProxiCraft/tags`
 - Verify tag appears
 
-### Step 6: Create GitHub Release
+### Step 6: Verify GitHub Changes
 
-1. **Navigate to GitHub Releases**:
-   - Go to: `https://github.com/rk-gamemods/7D2D-ProxiCraft/releases`
-   - Click "Draft a new release"
+**After push completes, verify everything is accessible:**
 
-2. **Fill Release Form**:
-   - **Tag**: Select `vX.Y.Z` (should exist from Step 5.3)
-   - **Release title**: `ProxiCraft vX.Y.Z`
-   - **Description**: Copy contents from `Release_vX.Y.Z.txt`
-   - **Attach file**: Upload `ProxiCraft/Release/ProxiCraft-X.Y.Z.zip`
+1. **Check Commit Appears**:
+   - Visit `https://github.com/rk-gamemods/7D2D-ProxiCraft/commits/master`
+   - Verify your release commit is at the top
 
-3. **Pre-release checkbox**:
-   - [ ] Check if this is a beta/experimental release
-   - [ ] Leave unchecked for stable releases
+2. **Check Tag Appears**:
+   - Visit `https://github.com/rk-gamemods/7D2D-ProxiCraft/tags`
+   - Verify `vX.Y.Z` tag exists
 
-4. **Publish**:
-   - Click "Publish release"
+3. **Test Direct Download Link**:
+   - The README.md download link uses direct repository access: `https://github.com/rk-gamemods/7D2D-ProxiCraft/raw/master/Release/ProxiCraft-X.Y.Z.zip`
+   - Open this URL in browser - should download the zip immediately
+   - If 404, wait 1-2 minutes for GitHub CDN to sync, then retry
 
-5. **Verification**:
-   - Visit release page: `https://github.com/rk-gamemods/7D2D-ProxiCraft/releases/tag/vX.Y.Z`
-   - Verify download link works
-   - Test the README.md download link: `https://github.com/rk-gamemods/7D2D-ProxiCraft/releases/download/vX.Y.Z/ProxiCraft-X.Y.Z.zip`
+4. **Verify README Displays Correctly**:
+   - Visit `https://github.com/rk-gamemods/7D2D-ProxiCraft`
+   - Check that download button shows new version
+   - Verify changelog section shows new entry
+
+**Note**: ProxiCraft uses direct repository file access instead of GitHub Releases for simplicity. Users download the zip file directly from the `Release/` folder.
 
 ### Step 7: Upload to Nexus Mods
 
@@ -306,12 +306,13 @@ git push origin vX.Y.Z
 
 Final checks after release is live:
 
-- [ ] GitHub release page loads correctly
-- [ ] GitHub download link works: `https://github.com/rk-gamemods/7D2D-ProxiCraft/releases/download/vX.Y.Z/ProxiCraft-X.Y.Z.zip`
+- [ ] GitHub commit and tag visible
+- [ ] GitHub direct download link works: `https://github.com/rk-gamemods/7D2D-ProxiCraft/raw/master/Release/ProxiCraft-X.Y.Z.zip`
+- [ ] README.md download link on GitHub main page works (critical - this is what users see first)
+- [ ] Changelog visible on GitHub
 - [ ] Nexus Mods page shows new version
 - [ ] Nexus download works
-- [ ] README.md download link on GitHub main page works (critical - this is what users see first)
-- [ ] Changelog visible on both GitHub and Nexus
+- [ ] Nexus description displays correctly
 
 **Optional**: Test installation in clean 7D2D instance to verify zip structure is correct.
 
