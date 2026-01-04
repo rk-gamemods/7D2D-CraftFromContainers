@@ -1,45 +1,9 @@
-[size=5][b]🎉 ProxiCraft v1.2.3 Released![/b][/size]
+[size=5][b]ProxiCraft v1.2.3 Released[/b][/size]
 
-[size=4][b]What's New:[/b][/size]
-
+[b]Changes:[/b]
 [list]
-[*][b]Enhanced Safety Mode Now Default:[/b] All [b]enhancedSafety*[/b] settings are now enabled by default for better multiplayer stability
-[*][b]Comprehensive Configuration Documentation:[/b] All 30+ settings now documented in detail with examples
+[*]Changed enhanced safety mode defaults to enabled
+[*]Configuration documentation expanded
 [/list]
 
-[line]
-
-[size=4][b]What This Means for You:[/b][/size]
-
-[b]If you're a new user:[/b] Fresh installations will automatically use Enhanced Safety Mode, which routes operations through a centralized safety layer (VirtualInventoryProvider) for more consistent multiplayer behavior.
-
-[b]If you're an existing user:[/b] Your custom [b]config.json[/b] is unchanged - you keep your current settings. Only fresh installations use the new defaults.
-
-[b]Why the change?[/b] Enhanced Safety Mode was previously marked "experimental" and disabled by default, but extensive testing has shown it to be robust and safe. It provides:
-[list]
-[*]More consistent multiplayer behavior
-[*]Simplified code paths (easier to maintain)
-[*]No performance cost
-[*]Functionally equivalent to standard mode for single-player
-[/list]
-
-[line]
-
-[size=4][b]Download:[/b][/size]
-
-[url=https://github.com/rk-gamemods/7D2D-ProxiCraft/raw/master/Release/ProxiCraft-1.2.3.zip]ProxiCraft-1.2.3.zip (GitHub)[/url]
-
-[line]
-
-[size=4][b]Full Changelog:[/b][/size]
-
-[b]v1.2.3[/b]
-[list]
-[*]Changed enhanced safety mode defaults to enabled (recommended for multiplayer stability)
-[*]Configuration documentation expanded with all 30+ settings comprehensively documented
-[*][i]Note: Existing users with custom config.json are unaffected - only fresh installations use new defaults[/i]
-[/list]
-
-[line]
-
-Questions? Issues? Report on [url=https://github.com/rk-gamemods/7D2D-ProxiCraft/issues]GitHub[/url]!
+[i]Note: Existing users with custom config.json are unaffected - only fresh installations use new defaults[/i]
