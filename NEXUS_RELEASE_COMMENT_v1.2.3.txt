@@ -5,5 +5,3 @@
 [*]Changed enhanced safety mode defaults to enabled
 [*]Configuration documentation expanded
 [/list]
-
-[i]Note: Existing users with custom config.json are unaffected - only fresh installations use new defaults[/i]
