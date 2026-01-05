@@ -1,17 +1,18 @@
 ## ProxiCraft v1.2.4
 
 ### Summary
-Bug fix for enhanced safety mode not working after switching between game sessions.
+Bug fixes for enhanced safety mode session switching and block repair from remote storage.
 
 ### Changes
 - **Fixed**: Enhanced safety mode breaking features (repair, reload, refuel, etc.) when switching between single-player and multiplayer sessions
 - **Fixed**: Multiplayer state now properly resets when starting a new game, preventing stale flags from blocking functionality
+- **Fixed**: Block repair (damaged blocks) now correctly uses repair materials from nearby containers
+  - Previously only block UPGRADE used container materials; block REPAIR did not
 
 ### Technical Details
-The issue occurred because multiplayer tracking state (`_isHosting`, `_immediatelyLockMod`, etc.) was never reset when starting a new game. If a user played multiplayer, then started single-player, the stale flags would cause `IsModAllowed()` to return `false`, silently disabling enhanced safety features.
+**Session switching fix**: The issue occurred because multiplayer tracking state (`_isHosting`, `_immediatelyLockMod`, etc.) was never reset when starting a new game. If a user played multiplayer, then started single-player, the stale flags would cause `IsModAllowed()` to return `false`, silently disabling enhanced safety features.
 
-### Installation
-1. Download ProxiCraft-1.2.4.zip
+**Block repair fix**: The game uses different code paths for repairing damaged blocks vs upgrading blocks. ProxiCraft previously only patched the upgrade path (`CanRemoveRequiredResource`/`RemoveRequiredResource`). Now we also patch the repair path (`canRemoveRequiredItem`/`removeRequiredItem`) so repair materials are pulled from nearby containers when the player doesn't have enough in their inventory.
 2. Extract and copy ProxiCraft folder to 7 Days To Die/Mods/
 3. Launch game with EAC disabled
 

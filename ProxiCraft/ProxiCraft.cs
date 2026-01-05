@@ -2859,21 +2859,33 @@ public class ProxiCraft : IModApi
             {
                 Block block = blockValue.Block;
                 if (block == null)
+                {
+                    LogDebug($"CanRemoveRequiredResource: block is null");
                     return;
+                }
 
                 // Get upgrade item name (mirrors vanilla logic)
                 string upgradeItemName = GetUpgradeItemName(__instance, block);
                 if (string.IsNullOrEmpty(upgradeItemName))
+                {
+                    LogDebug($"CanRemoveRequiredResource: upgradeItemName is null/empty for block {block.GetBlockName()}");
                     return;
+                }
 
                 // Get required count from block properties
                 if (!int.TryParse(block.Properties.Values[Block.PropUpgradeBlockClassItemCount], out int requiredCount))
+                {
+                    LogDebug($"CanRemoveRequiredResource: PropUpgradeBlockClassItemCount not found/invalid for block {block.GetBlockName()}");
                     return;
+                }
 
                 // Get item value for the upgrade material
                 ItemValue itemValue = ItemClass.GetItem(upgradeItemName);
                 if (itemValue == null || itemValue.IsEmpty())
+                {
+                    LogDebug($"CanRemoveRequiredResource: ItemClass.GetItem returned null for '{upgradeItemName}'");
                     return;
+                }
 
                 // Check how much player has (inventory + bag)
                 int playerCount = 0;
@@ -2890,7 +2902,8 @@ public class ProxiCraft : IModApi
                     // Enhanced Safety mode: Check multiplayer safety first
                     if (!MultiplayerModTracker.IsModAllowed())
                     {
-                        LogDebug($"CanRemoveRequiredResource (enhanced): MP locked, skipping storage check");
+                        string lockReason = MultiplayerModTracker.GetLockReason() ?? "unknown";
+                        LogDebug($"CanRemoveRequiredResource (enhanced): MP locked ({lockReason}), skipping storage check");
                         return;
                     }
                     containerCount = ContainerManager.GetItemCount(Config, itemValue);
@@ -2902,10 +2915,16 @@ public class ProxiCraft : IModApi
                 }
                 int totalAvailable = playerCount + containerCount;
 
+                LogDebug($"CanRemoveRequiredResource: {upgradeItemName} x{requiredCount}, player={playerCount}, containers={containerCount}, total={totalAvailable}");
+
                 if (totalAvailable >= requiredCount)
                 {
                     __result = true;
-                    LogDebug($"CanRemoveRequiredResource: {upgradeItemName} x{requiredCount}, player={playerCount}, containers={containerCount} -> allowed");
+                    LogDebug($"CanRemoveRequiredResource: ALLOWED - setting __result = true");
+                }
+                else
+                {
+                    LogDebug($"CanRemoveRequiredResource: NOT ENOUGH - need {requiredCount}, have {totalAvailable}");
                 }
             }
             catch (Exception ex)
@@ -3055,6 +3074,158 @@ public class ProxiCraft : IModApi
             }
 
             return null;
+        }
+    }
+
+    // ====================================================================================
+    // BLOCK REPAIR SUPPORT (Damaged Blocks)
+    // ====================================================================================
+    //
+    // Allows repairing DAMAGED blocks using materials from nearby containers.
+    // This is separate from block UPGRADE - repair is for restoring health to damaged blocks.
+    //
+    // The game uses canRemoveRequiredItem/removeRequiredItem for repair operations,
+    // which check if inventory OR bag has the full count required. Our patches extend
+    // this to also check containers when neither inventory source has enough.
+    // ====================================================================================
+
+    /// <summary>
+    /// Patch ItemActionRepair.canRemoveRequiredItem to check containers for repair materials.
+    /// Uses POSTFIX to add container check if vanilla returns false.
+    /// 
+    /// This handles the "can we repair this damaged block?" check.
+    /// </summary>
+    [HarmonyPatch(typeof(ItemActionRepair), "canRemoveRequiredItem")]
+    [HarmonyPriority(Priority.Low)]
+    private static class ItemActionRepair_canRemoveRequiredItem_Patch
+    {
+        public static void Postfix(ItemActionRepair __instance, ref bool __result, ItemInventoryData _data, ItemStack _itemStack)
+        {
+            // If vanilla succeeded or mod disabled, no need to intervene
+            if (__result || !Config?.modEnabled == true || !Config?.enableForRepairAndUpgrade == true)
+                return;
+
+            // Safety check - don't run if game state isn't ready
+            if (!IsGameReady())
+                return;
+
+            // Enhanced Safety check
+            if (Config.enhancedSafetyRepair && !MultiplayerModTracker.IsModAllowed())
+            {
+                LogDebug($"canRemoveRequiredItem (enhanced): MP locked, skipping storage check");
+                return;
+            }
+
+            try
+            {
+                if (_itemStack == null || _itemStack.IsEmpty())
+                    return;
+
+                // Check how much player has (inventory + bag)
+                int inventoryCount = _data?.holdingEntity?.inventory?.GetItemCount(_itemStack.itemValue) ?? 0;
+                int bagCount = _data?.holdingEntity?.bag?.GetItemCount(_itemStack.itemValue) ?? 0;
+                int playerTotal = inventoryCount + bagCount;
+
+                // Check containers
+                int containerCount = ContainerManager.GetItemCount(Config, _itemStack.itemValue);
+                int totalAvailable = playerTotal + containerCount;
+
+                LogDebug($"canRemoveRequiredItem: {_itemStack.itemValue.ItemClass?.GetItemName()} x{_itemStack.count}, player={playerTotal}, containers={containerCount}, total={totalAvailable}");
+
+                if (totalAvailable >= _itemStack.count)
+                {
+                    __result = true;
+                    LogDebug($"canRemoveRequiredItem: ALLOWED - setting __result = true");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogWarning($"Error in canRemoveRequiredItem patch: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Patch ItemActionRepair.removeRequiredItem to remove repair materials from containers.
+    /// Uses POSTFIX to remove from containers if vanilla fails to remove everything from player.
+    /// 
+    /// This handles the actual consumption of materials when repairing a damaged block.
+    /// </summary>
+    [HarmonyPatch(typeof(ItemActionRepair), "removeRequiredItem")]
+    [HarmonyPriority(Priority.Low)]
+    private static class ItemActionRepair_removeRequiredItem_Patch
+    {
+        public static void Postfix(ItemActionRepair __instance, ref bool __result, ItemInventoryData _data, ItemStack _itemStack)
+        {
+            // If vanilla succeeded or mod disabled, no need to intervene
+            if (__result || !Config?.modEnabled == true || !Config?.enableForRepairAndUpgrade == true)
+                return;
+
+            // Safety check - don't run if game state isn't ready
+            if (!IsGameReady())
+                return;
+
+            // Enhanced Safety check
+            if (Config.enhancedSafetyRepair && !MultiplayerModTracker.IsModAllowed())
+            {
+                LogDebug($"removeRequiredItem (enhanced): MP locked, skipping storage removal");
+                return;
+            }
+
+            try
+            {
+                if (_itemStack == null || _itemStack.IsEmpty())
+                    return;
+
+                int requiredCount = _itemStack.count;
+
+                // Calculate how much the player has across both sources
+                int inventoryCount = _data?.holdingEntity?.inventory?.GetItemCount(_itemStack.itemValue) ?? 0;
+                int bagCount = _data?.holdingEntity?.bag?.GetItemCount(_itemStack.itemValue) ?? 0;
+                int playerTotal = inventoryCount + bagCount;
+
+                // Check containers
+                int containerCount = ContainerManager.GetItemCount(Config, _itemStack.itemValue);
+                int totalAvailable = playerTotal + containerCount;
+
+                // If we don't have enough total, bail
+                if (totalAvailable < requiredCount)
+                    return;
+
+                // Remove in order: inventory -> bag -> containers
+                int remaining = requiredCount;
+
+                // Remove from inventory first
+                if (remaining > 0 && _data?.holdingEntity?.inventory != null)
+                {
+                    int removed = _data.holdingEntity.inventory.DecItem(_itemStack.itemValue, remaining);
+                    remaining -= removed;
+                }
+
+                // Then bag
+                if (remaining > 0 && _data?.holdingEntity?.bag != null)
+                {
+                    int removed = _data.holdingEntity.bag.DecItem(_itemStack.itemValue, remaining);
+                    remaining -= removed;
+                }
+
+                // Finally containers
+                if (remaining > 0)
+                {
+                    int removed = ContainerManager.RemoveItems(Config, _itemStack.itemValue, remaining);
+                    remaining -= removed;
+                    LogDebug($"removeRequiredItem: Removed {removed} {_itemStack.itemValue.ItemClass?.GetItemName()} from containers (needed {requiredCount})");
+                }
+
+                if (remaining <= 0)
+                {
+                    __result = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogWarning($"Error in removeRequiredItem patch: {ex.Message}");
+            }
         }
     }
 
