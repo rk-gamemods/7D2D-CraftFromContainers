@@ -56,7 +56,7 @@ public class ProxiCraft : IModApi
 {
     // Mod metadata
     public const string MOD_NAME = "ProxiCraft";
-    public const string MOD_VERSION = "1.2.3";
+    public const string MOD_VERSION = "1.2.4";
     
     // Static references
     private static ProxiCraft _instance;
@@ -775,12 +775,18 @@ public class ProxiCraft : IModApi
         {
             try
             {
+                // Reset multiplayer state from any previous session
+                // OnStopHosting unregisters event handlers (safe to call even if wasn't hosting)
+                MultiplayerModTracker.OnStopHosting();
+                // Clear resets ALL state including client-side variables
+                MultiplayerModTracker.Clear();
+
                 ContainerManager.ClearCache();
-                LogDebug("Container cache cleared for new game");
+                LogDebug("Container cache and multiplayer state cleared for new game");
             }
             catch (Exception ex)
             {
-                LogWarning($"Error clearing cache: {ex.Message}");
+                LogWarning($"Error clearing state: {ex.Message}");
             }
         }
     }

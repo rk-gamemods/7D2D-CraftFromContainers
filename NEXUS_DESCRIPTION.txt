@@ -353,6 +353,12 @@ Use only ONE mod of this type.
 
 [size=4][b]Changelog[/b][/size]
 
+[b]v1.2.4[/b]
+[list]
+[*]Fixed enhanced safety mode breaking features when switching between game sessions
+[*]Multiplayer state now properly resets when starting a new game
+[/list]
+
 [b]v1.2.3[/b]
 [list]
 [*]Changed enhanced safety mode defaults to enabled (recommended for multiplayer stability)
