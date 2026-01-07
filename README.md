@@ -292,10 +292,6 @@ If you prefer their versions, check them out! ProxiCraft is a from-scratch imple
 
 **Fixed:**
 - Fixed mod failing to load on some dedicated server hosting panels (CubeCoders AMP, etc.)
-- Added robust path detection with multiple fallback methods
-- Mod now checks both AppData and game install Mods folders (matching game behavior)
-
-**For Server Hosts:** If the mod still fails to find its folder (very rare), you can set the `PROXICRAFT_PATH` environment variable to the full path of the ProxiCraft folder (e.g., `C:\GameServers\7DaysToDie\Mods\ProxiCraft`).
 
 ### v1.2.4 - Enhanced Safety Fix
 
