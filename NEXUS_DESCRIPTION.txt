@@ -249,6 +249,8 @@ Set any to [b]false[/b] to disable that feature.
 "verboseHealthCheck": false    # Always show full startup diagnostic
 [/code]
 
+[b]Note:[/b] Debug settings are never synced from server - each player controls their own logging.
+
 [b]Multiplayer Safety (CRITICAL)[/b]
 [code]
 "multiplayerImmediateLock": true,          # Lock mod when clients connect (RECOMMENDED)
@@ -331,6 +333,7 @@ Press F1, then type:
 [*][b]pc test[/b] - See what containers are found
 [*][b]pc fullcheck[/b] - Full diagnostic for bug reports
 [*][b]pc toggle[/b] - Enable/disable mod
+[*][b]pc debug[/b] - Toggle debug logging (writes to pc_debug.log in mod folder)
 [*][b]pc set range 30[/b] - Change settings
 [/list]
 
@@ -352,6 +355,12 @@ Use only ONE mod of this type.
 [line]
 
 [size=4][b]Changelog[/b][/size]
+
+[b]v1.2.5[/b]
+[list]
+[*]Fixed mod failing to load on some dedicated server hosting panels (CubeCoders AMP, etc.)
+[*]Added robust path detection with multiple fallback methods
+[/list]
 
 [b]v1.2.4[/b]
 [list]

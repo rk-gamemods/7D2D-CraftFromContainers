@@ -4,7 +4,7 @@ A 7 Days to Die mod that allows crafting, reloading, refueling, and repairs usin
 
 **[Nexus Mods](https://www.nexusmods.com/7daystodie/mods/9269)** • **[GitHub](https://github.com/rk-gamemods/7D2D-ProxiCraft)**
 
-## ⬇️ [Download ProxiCraft-1.2.4.zip](https://github.com/rk-gamemods/7D2D-ProxiCraft/raw/master/Release/ProxiCraft-1.2.4.zip)
+## ⬇️ [Download ProxiCraft-1.2.5.zip](https://github.com/rk-gamemods/7D2D-ProxiCraft/raw/master/Release/ProxiCraft-1.2.5.zip)
 
 ---
 
@@ -89,6 +89,12 @@ ProxiCraft includes experimental multiplayer support with automatic crash protec
 
 ⚠️ **WARNING:** Setting `multiplayerImmediateLock=false` removes crash protection. Only use on moderated servers where you enforce mod installation externally.
 
+**Settings Sync Behavior:**
+- **Server-synced:** `range`, all `pullFrom*`, all `enableFor*`, `storagePriority`, `respectLockedSlots`, `allowLockedContainers`
+- **Local-only (never synced):** `isDebug`, `modEnabled`, `verboseHealthCheck`, `multiplayerImmediateLock`, `multiplayerHandshakeTimeoutSeconds`, all `enhancedSafety*` settings
+
+Debug logging cannot be enabled remotely by a server - each player controls their own logging.
+
 **Testing Status:**
 - Single player ✅
 - Basic dedicated server ✅
@@ -162,6 +168,7 @@ Edit `config.json` in the mod folder:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `range` | 15 | Search radius in blocks. Use 5 (same room), 15 (same floor), 30 (entire building), or -1 (unlimited). |
+| `isDebug` | false | Enable verbose logging to `pc_debug.log` in the mod folder. Use for troubleshooting. |
 | `storagePriority` | See above | Lower number = checked first. Items pulled from first available source. |
 | `respectLockedSlots` | true | Skip items in user-locked container slots. |
 | `pullFromWorkstationOutputs` | true | Only OUTPUT slots counted (not input/fuel/tool). |
@@ -180,6 +187,7 @@ Open console with F1:
 | `pc fullcheck` | Full diagnostic (saves to `fullcheck_report.txt`) |
 | `pc conflicts` | Check for mod conflicts |
 | `pc toggle` | Enable/disable mod temporarily |
+| `pc debug` | Toggle debug logging (writes to `pc_debug.log` in mod folder) |
 | `pc reload` | Reload config from file |
 | `pc perf on/off/report` | Performance profiling |
 
@@ -201,6 +209,7 @@ pc config save              # Save changes to file
 2. **Check health:** `pc health` - Are features working?
 3. **Test scanning:** `pc test` - Can mod see containers?
 4. **Full report:** `pc fullcheck` - Saves `fullcheck_report.txt` for bug reports
+5. **Enable debug:** `pc debug` or set `isDebug: true` - Writes detailed logs to `pc_debug.log` in mod folder
 
 ### Multiplayer Issues
 
@@ -278,6 +287,15 @@ If you prefer their versions, check them out! ProxiCraft is a from-scratch imple
 ---
 
 ## Changelog
+
+### v1.2.5 - Hosting Panel Compatibility
+
+**Fixed:**
+- Fixed mod failing to load on some dedicated server hosting panels (CubeCoders AMP, etc.)
+- Added robust path detection with multiple fallback methods
+- Mod now checks both AppData and game install Mods folders (matching game behavior)
+
+**For Server Hosts:** If the mod still fails to find its folder (very rare), you can set the `PROXICRAFT_PATH` environment variable to the full path of the ProxiCraft folder (e.g., `C:\GameServers\7DaysToDie\Mods\ProxiCraft`).
 
 ### v1.2.4 - Enhanced Safety Fix
 

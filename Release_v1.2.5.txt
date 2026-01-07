@@ -1,0 +1,35 @@
+## ProxiCraft v1.2.5
+
+### Summary
+Fixed mod failing to load on dedicated server hosting panels like CubeCoders AMP.
+
+### Changes
+- Added robust path detection with multiple fallback methods
+- Mod now checks both AppData and game install Mods folders (matching how the game itself loads mods)
+- Added diagnostic logging to help troubleshoot hosting issues
+
+### Technical Details
+Previously, ProxiCraft used `Assembly.GetExecutingAssembly().Location` to find its folder. This returns an empty string on some hosting panels that shadow-copy or manage assemblies differently.
+
+Now the mod tries multiple methods in order:
+1. Assembly location (standard)
+2. Assembly code base (legacy fallback)
+3. Ask the game where user data is stored, check Mods folder there
+4. Ask the game where it's installed, check Mods folder there
+5. Check relative to the application's working directory
+6. Environment variable override (last resort)
+
+### For Server Hosts
+If you're still having issues after updating (very rare), you can set an environment variable:
+- Name: PROXICRAFT_PATH
+- Value: Full path to ProxiCraft folder (e.g., C:\GameServers\7DaysToDie\Mods\ProxiCraft)
+
+### Installation
+1. Download ProxiCraft-1.2.5.zip
+2. Extract and copy ProxiCraft folder to 7 Days To Die/Mods/
+3. Launch game with EAC disabled
+
+**Multiplayer**: Install on server AND all clients (same version)
+
+### Reporting Issues
+Found a bug? https://github.com/rk-gamemods/7D2D-ProxiCraft/issues
