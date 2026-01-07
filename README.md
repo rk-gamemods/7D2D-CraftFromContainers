@@ -293,6 +293,20 @@ If you prefer their versions, check them out! ProxiCraft is a from-scratch imple
 **Fixed:**
 - Fixed mod failing to load on some dedicated server hosting panels (CubeCoders AMP, etc.)
 
+**For Server Hosts (if auto-detection still fails):**
+
+You can manually tell ProxiCraft where it's installed by setting an environment variable called `PROXICRAFT_PATH` to the full folder path.
+
+| Platform | Where to Set It |
+|----------|-----------------|
+| **Windows** | Control Panel → System → Advanced System Settings → Environment Variables → New |
+| **Linux** | Add `export PROXICRAFT_PATH="/path/to/Mods/ProxiCraft"` to your startup script or `/etc/environment` |
+| **CubeCoders AMP** | Configuration → Server Settings → Environment Variables |
+| **Pterodactyl/Pelican** | Server → Startup → Environment Variables |
+| **Docker** | Add `-e PROXICRAFT_PATH=/path/to/Mods/ProxiCraft` to your docker run command |
+
+Example value: `C:\GameServers\7DaysToDie\Mods\ProxiCraft` or `/home/sdtd/Mods/ProxiCraft`
+
 ### v1.2.4 - Enhanced Safety Fix
 
 **Fixed:**
