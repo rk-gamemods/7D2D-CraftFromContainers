@@ -360,7 +360,9 @@ Use only ONE mod of this type.
 [list]
 [*]Fixed multiplayer handshake packet loss causing mod to lock up for entire server session
 [*]Fixed orphan container locks when players disconnect (containers no longer stay "locked" forever)
-[*]Added retry mechanism for handshake and lock broadcasts on temporary connection hiccups
+[*]Fixed race condition where out-of-order packets could cause ghost locks
+[*]Added lock expiration (5 min default) - ghost locks self-heal automatically
+[*]Added retry mechanism for handshake and lock broadcasts on connection hiccups
 [*]Improved network diagnostics for troubleshooting
 [/list]
 

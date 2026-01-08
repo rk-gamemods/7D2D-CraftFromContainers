@@ -880,6 +880,7 @@ public class ProxiCraft : IModApi
     /// <summary>
     /// Retry broadcasting lock state after a brief delay.
     /// Handles temporary connection hiccups - if connection doesn't recover, gives up gracefully.
+    /// For lock retries, cancels if the container was unlocked before retry executes.
     /// </summary>
     private static System.Collections.IEnumerator RetryBroadcastLock(GameManager gm, Vector3i blockPos, int lootEntityId, bool unlock)
     {
@@ -899,6 +900,21 @@ public class ProxiCraft : IModApi
             {
                 LogWarning($"[Network] Retry failed: still not connected (container {(unlock ? "unlock" : "lock")} at {blockPos})");
                 yield break;
+            }
+
+            // For lock retries: Check if the container is still locked on the server
+            // If player already closed it, don't send stale lock
+            if (!unlock)
+            {
+                var tileEntity = lootEntityId != -1 
+                    ? gm.m_World.GetTileEntity(lootEntityId) 
+                    : gm.m_World.GetTileEntity(blockPos);
+                    
+                if (tileEntity == null || !gm.lockedTileEntities.ContainsKey((ITileEntity)(object)tileEntity))
+                {
+                    LogDebug($"[Network] Lock retry cancelled: container at {blockPos} already unlocked");
+                    yield break;
+                }
             }
 
             Log($"[Network] Retry successful: broadcasting {(unlock ? "unlock" : "lock")} at {blockPos}");

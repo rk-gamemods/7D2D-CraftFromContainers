@@ -190,6 +190,14 @@ public class ModConfig
     /// </summary>
     public float multiplayerHandshakeTimeoutSeconds = 10f;
 
+    /// <summary>
+    /// Time in seconds before a container lock automatically expires.
+    /// Prevents "ghost locks" if unlock packets are lost or players disconnect ungracefully.
+    /// Default: 300 seconds (5 minutes) - long enough for normal use, short enough to self-heal.
+    /// Set to 0 to disable expiration (not recommended).
+    /// </summary>
+    public float containerLockExpirySeconds = 300f;
+
     // ===========================================
     // DEPRECATED/REMOVED FEATURES
     // ===========================================

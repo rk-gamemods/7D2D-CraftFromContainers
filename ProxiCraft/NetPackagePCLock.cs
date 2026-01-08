@@ -106,15 +106,14 @@ internal class NetPackagePCLock : NetPackage
             }
         }
         
+        // Use ContainerManager's lock methods for last-write-wins ordering and expiration
         if (!unlock)
         {
-            ProxiCraft.LogDebug($"[Network] Container locked at {position}");
-            ContainerManager.LockedList.Add(position);
+            ContainerManager.AddLock(position, timestampUtcTicks);
         }
         else
         {
-            ProxiCraft.LogDebug($"[Network] Container unlocked at {position}");
-            ContainerManager.LockedList.Remove(position);
+            ContainerManager.RemoveLock(position, timestampUtcTicks);
         }
     }
 }

@@ -97,8 +97,10 @@ public static class ContainerManager
     private static readonly Dictionary<Vector3i, object> _knownStorageDict = new Dictionary<Vector3i, object>();
     private static readonly Dictionary<Vector3i, object> _currentStorageDict = new Dictionary<Vector3i, object>();
     
-    // Lock positions from multiplayer sync
+    // Lock positions from multiplayer sync - with timestamps for expiration and ordering
     public static readonly HashSet<Vector3i> LockedList = new HashSet<Vector3i>();
+    private static readonly Dictionary<Vector3i, long> _lockTimestamps = new Dictionary<Vector3i, long>();
+    private static readonly Dictionary<Vector3i, long> _lockPacketTimestamps = new Dictionary<Vector3i, long>(); // For ordering
     
     // Cache timing to avoid excessive scanning
     private static float _lastScanTime;
@@ -325,6 +327,8 @@ public static class ContainerManager
         _currentStorageDict.Clear();
         _itemCountCache.Clear();
         LockedList.Clear();
+        _lockTimestamps.Clear();
+        _lockPacketTimestamps.Clear();
         _lastScanTime = 0f;
         _lastScanPosition = Vector3.zero;
         _forceCacheRefresh = true;
@@ -337,6 +341,120 @@ public static class ContainerManager
         CurrentOpenWorkstation = null;
         // Reset scan method decision to force re-evaluation on next scan
         _scanMethodCalculated = false;
+    }
+
+    // ====================================================================================
+    // CONTAINER LOCK MANAGEMENT - Multiplayer coordination
+    // ====================================================================================
+    // Tracks which containers are locked by other players to prevent conflicts.
+    // Features:
+    // - Last-write-wins ordering using packet timestamps (handles out-of-order packets)
+    // - Lock expiration (handles ghost locks from crashed clients)
+    // - Lazy expiration check (no background threads)
+    // ====================================================================================
+
+    /// <summary>
+    /// Adds a container lock. Uses timestamps for last-write-wins ordering.
+    /// Called from NetPackagePCLock.ProcessPackage() when lock packet received.
+    /// </summary>
+    /// <param name="position">World position of the container</param>
+    /// <param name="packetTimestamp">UTC ticks from the packet (for ordering)</param>
+    public static void AddLock(Vector3i position, long packetTimestamp)
+    {
+        // Last-write-wins: Only apply if this packet is newer than the last one for this position
+        if (_lockPacketTimestamps.TryGetValue(position, out var lastTimestamp) && packetTimestamp < lastTimestamp)
+        {
+            ProxiCraft.LogDebug($"[Network] Ignoring stale LOCK packet for {position} (packet={packetTimestamp}, last={lastTimestamp})");
+            return;
+        }
+
+        _lockPacketTimestamps[position] = packetTimestamp;
+        _lockTimestamps[position] = DateTime.UtcNow.Ticks;
+        LockedList.Add(position);
+        ProxiCraft.LogDebug($"[Network] Container locked at {position}");
+    }
+
+    /// <summary>
+    /// Removes a container lock. Uses timestamps for last-write-wins ordering.
+    /// Called from NetPackagePCLock.ProcessPackage() when unlock packet received.
+    /// </summary>
+    /// <param name="position">World position of the container</param>
+    /// <param name="packetTimestamp">UTC ticks from the packet (for ordering)</param>
+    public static void RemoveLock(Vector3i position, long packetTimestamp)
+    {
+        // Last-write-wins: Only apply if this packet is newer or equal (unlock wins ties)
+        if (_lockPacketTimestamps.TryGetValue(position, out var lastTimestamp) && packetTimestamp < lastTimestamp)
+        {
+            ProxiCraft.LogDebug($"[Network] Ignoring stale UNLOCK packet for {position} (packet={packetTimestamp}, last={lastTimestamp})");
+            return;
+        }
+
+        _lockPacketTimestamps[position] = packetTimestamp;
+        _lockTimestamps.Remove(position);
+        LockedList.Remove(position);
+        ProxiCraft.LogDebug($"[Network] Container unlocked at {position}");
+    }
+
+    /// <summary>
+    /// Checks if a container is locked by another player.
+    /// Includes lazy expiration check - expired locks are auto-removed.
+    /// </summary>
+    /// <param name="position">World position to check</param>
+    /// <returns>True if container is locked (and not expired)</returns>
+    public static bool IsContainerLocked(Vector3i position)
+    {
+        if (!LockedList.Contains(position))
+            return false;
+
+        // Check expiration
+        var expirySeconds = ProxiCraft.Config?.containerLockExpirySeconds ?? 300f;
+        if (expirySeconds > 0 && _lockTimestamps.TryGetValue(position, out var lockTicks))
+        {
+            var lockTime = new DateTime(lockTicks, DateTimeKind.Utc);
+            var elapsed = (DateTime.UtcNow - lockTime).TotalSeconds;
+            
+            if (elapsed > expirySeconds)
+            {
+                // Lock expired - auto-remove
+                LockedList.Remove(position);
+                _lockTimestamps.Remove(position);
+                _lockPacketTimestamps.Remove(position);
+                ProxiCraft.Log($"[Network] Lock expired for container at {position} (after {elapsed:F0}s)");
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Gets diagnostic info about currently locked containers.
+    /// </summary>
+    public static string GetLockDiagnostics()
+    {
+        if (LockedList.Count == 0)
+            return "No containers locked";
+
+        var lines = new List<string> { $"Locked containers: {LockedList.Count}" };
+        var expirySeconds = ProxiCraft.Config?.containerLockExpirySeconds ?? 300f;
+        
+        foreach (var pos in LockedList.ToList()) // ToList to avoid modification during iteration
+        {
+            if (_lockTimestamps.TryGetValue(pos, out var lockTicks))
+            {
+                var lockTime = new DateTime(lockTicks, DateTimeKind.Utc);
+                var elapsed = (DateTime.UtcNow - lockTime).TotalSeconds;
+                var remaining = expirySeconds > 0 ? expirySeconds - elapsed : -1;
+                lines.Add($"  {pos}: locked {elapsed:F0}s ago" + 
+                         (remaining > 0 ? $" (expires in {remaining:F0}s)" : " (no expiry)"));
+            }
+            else
+            {
+                lines.Add($"  {pos}: no timestamp (legacy lock)");
+            }
+        }
+
+        return string.Join("\n", lines);
     }
 
     /// <summary>
@@ -934,8 +1052,8 @@ public static class ContainerManager
                                     continue;
                             }
 
-                            // Skip locked containers in multiplayer
-                            if (LockedList.Contains(worldPos))
+                            // Skip locked containers in multiplayer (with expiration check)
+                            if (IsContainerLocked(worldPos))
                                 continue;
 
                             CountTileEntityItems(tileEntity, config);
@@ -2123,8 +2241,8 @@ public static class ContainerManager
                     if (config.range > 0f && Vector3.Distance(playerPos, (Vector3)worldPos) >= config.range)
                         continue;
 
-                    // Skip if this container is locked by another player in multiplayer
-                    if (LockedList.Contains(worldPos))
+                    // Skip if this container is locked by another player in multiplayer (with expiration check)
+                    if (IsContainerLocked(worldPos))
                         continue;
 
                     // Process dew collectors

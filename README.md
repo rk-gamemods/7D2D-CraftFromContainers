@@ -247,6 +247,126 @@ ProxiCraft is designed to survive game updates:
 
 **Virtual Inventory Architecture:** All storage operations flow through `VirtualInventoryProvider` - centralizes multiplayer safety, ensures consistent behavior, enables global bug fixes.
 
+### Multiplayer Network Architecture
+
+<details>
+<summary>Click to expand network flow documentation</summary>
+
+#### Network Packets
+
+| Packet | Direction | Purpose |
+|--------|-----------|---------|
+| `NetPackagePCHandshake` | Both | Announces mod presence, version, conflicts |
+| `NetPackagePCLock` | Server→Clients | Broadcasts container lock/unlock state |
+| `NetPackagePCConfigSync` | Server→Client | Sends server config to joining clients |
+
+#### Container Lock Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PLAYER OPENS CONTAINER                                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Player → Opens container (press E)                                         │
+│    │                                                                        │
+│    ├─→ [SERVER] Game calls TELockServer()                                   │
+│    │     └─→ Adds to lockedTileEntities dictionary                          │
+│    │                                                                        │
+│    ├─→ [PROXICRAFT] TELockServer patch fires                                │
+│    │     ├─→ Connection OK? → Broadcast NetPackagePCLock (unlock=false)     │
+│    │     └─→ Connection hiccup? → Schedule retry in 500ms                   │
+│    │                                                                        │
+│    └─→ [ALL CLIENTS] Receive lock packet                                    │
+│          ├─→ Check timestamp (last-write-wins ordering)                     │
+│          ├─→ Add to LockedList with timestamp                               │
+│          └─→ Container excluded from all operations                         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PLAYER CLOSES CONTAINER                                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Player → Closes container (Tab or walk away)                               │
+│    │                                                                        │
+│    ├─→ [SERVER] Game calls TEUnlockServer()                                 │
+│    │     └─→ Removes from lockedTileEntities                                │
+│    │                                                                        │
+│    ├─→ [PROXICRAFT] TEUnlockServer patch fires                              │
+│    │     ├─→ Connection OK? → Broadcast NetPackagePCLock (unlock=true)      │
+│    │     └─→ Connection hiccup? → Schedule retry in 500ms                   │
+│    │                                                                        │
+│    └─→ [ALL CLIENTS] Receive unlock packet                                  │
+│          ├─→ Check timestamp (last-write-wins ordering)                     │
+│          └─→ Remove from LockedList → Container available                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PLAYER DISCONNECTS WITH CONTAINER OPEN                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Player → Disconnects (crash, leave, kick)                                  │
+│    │                                                                        │
+│    ├─→ [SERVER] Game calls ClearTileEntityLockForClient()                   │
+│    │                                                                        │
+│    ├─→ [PROXICRAFT] Patch captures container position BEFORE clear          │
+│    │     └─→ Broadcasts unlock packet to all clients                        │
+│    │                                                                        │
+│    └─→ [ALL CLIENTS] Receive orphan unlock                                  │
+│          └─→ Remove from LockedList → Container available                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Race Condition Handling
+
+| Scenario | Problem | Solution |
+|----------|---------|----------|
+| Unlock arrives before Lock | Ghost lock | **Last-write-wins**: Packets have timestamps, only newer packets apply |
+| Lock fails, retry collides with Unlock | Stale lock | **Retry cancellation**: Lock retry checks if container still locked before sending |
+| Player disconnects abruptly | Orphan lock | **Orphan cleanup**: ClearTileEntityLockForClient patch broadcasts unlock |
+| All above fail | Permanent ghost lock | **Lock expiration**: Locks auto-expire after 5 minutes (configurable) |
+| High latency (>500ms) | Stale state | **Eventual consistency**: Acceptable trade-off; logged for diagnostics |
+
+#### Lock Expiration (Self-Healing)
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Lock added at T=0     T=300s (5 min)                           │
+│      │                     │                                   │
+│      ▼                     ▼                                   │
+│  ┌───────┐            ┌───────┐                                │
+│  │LOCKED │────────────│EXPIRED│ → Auto-removed on next access  │
+│  └───────┘            └───────┘                                │
+│                                                                │
+│  Config: containerLockExpirySeconds = 300 (default)            │
+│  Set to 0 to disable expiration (not recommended)              │
+└────────────────────────────────────────────────────────────────┘
+```
+
+- Expiration checked lazily (only when accessing container)
+- No background threads or heartbeats
+- Self-healing: ghost locks eventually resolve without intervention
+- 5 minutes is long enough for any normal operation
+
+#### Error Handling Philosophy
+
+| Priority | Behavior |
+|----------|----------|
+| 1st | **Never crash** - All network operations wrapped in try-catch |
+| 2nd | **Prefer "available" over "locked"** - Ghost unlocks better than ghost locks |
+| 3rd | **Log everything** - Errors logged for diagnostics |
+| 4th | **Eventual consistency** - Brief item duplication better than permanent dysfunction |
+
+**Packet deserialization failure:** Defaults to `unlock=true` (safe default)
+
+**Connection unavailable:** Retry once after 500ms, then give up with warning
+
+**High latency (>500ms):** Warning logged, packet still processed
+
+</details>
+
 ### Project Structure
 
 ```
@@ -293,8 +413,10 @@ If you prefer their versions, check them out! ProxiCraft is a from-scratch imple
 **Fixed:**
 - Fixed multiplayer handshake packet loss causing mod to lock up for entire server session
 - Fixed orphan container locks when players disconnect (containers no longer stay "locked" forever)
-- Added retry mechanism for client handshake (1-second intervals until timeout)
-- Added retry mechanism for lock/unlock broadcasts on temporary connection hiccups
+- Fixed race condition where out-of-order packets could cause ghost locks (last-write-wins ordering)
+- Added lock expiration (5 min default) - ghost locks self-heal without intervention
+- Added retry mechanism for handshake and lock broadcasts on temporary connection hiccups
+- Added lock retry cancellation to prevent stale locks after rapid open/close
 - Added network latency diagnostics for troubleshooting slow connections
 - Improved error handling in packet deserialization
 
