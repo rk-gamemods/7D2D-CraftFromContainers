@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 
 namespace ProxiCraft;
@@ -6,6 +7,7 @@ namespace ProxiCraft;
 /// Network packet for synchronizing container lock state in multiplayer.
 /// When a player opens or closes a container, this packet is broadcast to
 /// other clients so they know not to pull items from that container.
+/// Includes timestamp for stale packet detection and latency diagnostics.
 /// </summary>
 internal class NetPackagePCLock : NetPackage
 {
@@ -13,6 +15,7 @@ internal class NetPackagePCLock : NetPackage
     public int posY;
     public int posZ;
     public bool unlock;
+    public long timestampUtcTicks; // UTC timestamp for latency tracking
 
     public NetPackagePCLock Setup(Vector3i _pos, bool _unlock)
     {
@@ -20,29 +23,52 @@ internal class NetPackagePCLock : NetPackage
         posY = _pos.y;
         posZ = _pos.z;
         unlock = _unlock;
+        timestampUtcTicks = DateTime.UtcNow.Ticks;
         return this;
     }
 
     public override void read(PooledBinaryReader _br)
     {
-        posX = ((BinaryReader)(object)_br).ReadInt32();
-        posY = ((BinaryReader)(object)_br).ReadInt32();
-        posZ = ((BinaryReader)(object)_br).ReadInt32();
-        unlock = ((BinaryReader)(object)_br).ReadBoolean();
+        try
+        {
+            var reader = (BinaryReader)(object)_br;
+            posX = reader.ReadInt32();
+            posY = reader.ReadInt32();
+            posZ = reader.ReadInt32();
+            unlock = reader.ReadBoolean();
+            timestampUtcTicks = reader.ReadInt64();
+        }
+        catch (Exception ex)
+        {
+            // Malformed packet - set to safe defaults
+            ProxiCraft.LogDebug($"[Network] Failed to read lock packet: {ex.Message}");
+            posX = posY = posZ = int.MinValue;
+            unlock = true; // Default to unlock (safer)
+            timestampUtcTicks = 0;
+        }
     }
 
     public override void write(PooledBinaryWriter _bw)
     {
-        ((NetPackage)this).write(_bw);
-        ((BinaryWriter)(object)_bw).Write(posX);
-        ((BinaryWriter)(object)_bw).Write(posY);
-        ((BinaryWriter)(object)_bw).Write(posZ);
-        ((BinaryWriter)(object)_bw).Write(unlock);
+        try
+        {
+            ((NetPackage)this).write(_bw);
+            var writer = (BinaryWriter)(object)_bw;
+            writer.Write(posX);
+            writer.Write(posY);
+            writer.Write(posZ);
+            writer.Write(unlock);
+            writer.Write(timestampUtcTicks);
+        }
+        catch (Exception ex)
+        {
+            ProxiCraft.LogDebug($"[Network] Failed to write lock packet: {ex.Message}");
+        }
     }
 
     public override int GetLength()
     {
-        return sizeof(int) * 3 + sizeof(bool);
+        return sizeof(int) * 3 + sizeof(bool) + sizeof(long);
     }
 
     public override void ProcessPackage(World _world, GameManager _callbacks)
@@ -54,16 +80,40 @@ internal class NetPackagePCLock : NetPackage
         if (SingletonMonoBehaviour<ConnectionManager>.Instance.IsServer)
             return;
 
+        // Validate packet data
+        if (posX == int.MinValue)
+        {
+            ProxiCraft.LogDebug("[Network] Ignoring invalid lock packet");
+            return;
+        }
+
         var position = new Vector3i(posX, posY, posZ);
+        
+        // Calculate and log latency if timestamp is valid
+        if (timestampUtcTicks > 0)
+        {
+            var sentTime = new DateTime(timestampUtcTicks, DateTimeKind.Utc);
+            var latencyMs = (DateTime.UtcNow - sentTime).TotalMilliseconds;
+            
+            // Log if latency is unusually high (>500ms)
+            if (latencyMs > 500)
+            {
+                ProxiCraft.LogWarning($"[Network] High latency detected: Lock packet took {latencyMs:F0}ms (sent {sentTime:HH:mm:ss.fff} UTC)");
+            }
+            else if (ProxiCraft.Config?.isDebug == true)
+            {
+                ProxiCraft.LogDebug($"[Network] Lock packet latency: {latencyMs:F0}ms");
+            }
+        }
         
         if (!unlock)
         {
-            ProxiCraft.LogDebug($"Received locked message for {position}");
+            ProxiCraft.LogDebug($"[Network] Container locked at {position}");
             ContainerManager.LockedList.Add(position);
         }
         else
         {
-            ProxiCraft.LogDebug($"Received unlocked message for {position}");
+            ProxiCraft.LogDebug($"[Network] Container unlocked at {position}");
             ContainerManager.LockedList.Remove(position);
         }
     }

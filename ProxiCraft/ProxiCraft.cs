@@ -56,7 +56,7 @@ public class ProxiCraft : IModApi
 {
     // Mod metadata
     public const string MOD_NAME = "ProxiCraft";
-    public const string MOD_VERSION = "1.2.6";
+    public const string MOD_VERSION = "1.2.7";
     
     // Static references
     private static ProxiCraft _instance;
@@ -274,29 +274,13 @@ public class ProxiCraft : IModApi
             SingletonMonoBehaviour<ConnectionManager>.Instance.SendToServer(
                 (NetPackage)(object)packet, false);
 
-            // Start tracking for server response timeout
+            // Start retry mechanism - will send handshake every 1 second until response or timeout
             MultiplayerModTracker.OnHandshakeSent();
-
-            // Schedule a check for server response after timeout
-            ThreadManager.StartCoroutine(CheckServerResponseAfterDelay());
         }
         catch (Exception ex)
         {
             LogWarning($"Failed to send multiplayer handshake: {ex.Message}");
         }
-    }
-
-    /// <summary>
-    /// Checks for server response after the timeout period.
-    /// If no response received, shows a notice to the user.
-    /// </summary>
-    private static System.Collections.IEnumerator CheckServerResponseAfterDelay()
-    {
-        // Wait for timeout period (plus a small buffer)
-        yield return new WaitForSeconds(12f);
-
-        // Check if server responded
-        MultiplayerModTracker.CheckServerResponseTimeout();
     }
 
     #endregion
@@ -802,7 +786,8 @@ public class ProxiCraft : IModApi
 
             try
             {
-                if (!SingletonMonoBehaviour<ConnectionManager>.Instance.IsServer)
+                var connManager = SingletonMonoBehaviour<ConnectionManager>.Instance;
+                if (connManager == null || !connManager.IsServer || !connManager.IsConnected)
                     return;
 
                 var tileEntity = _lootEntityId != -1 
@@ -811,15 +796,15 @@ public class ProxiCraft : IModApi
 
                 if (tileEntity != null && __instance.lockedTileEntities.ContainsKey((ITileEntity)(object)tileEntity))
                 {
-                    LogDebug($"Broadcasting container lock at {_blockPos}");
+                    LogDebug($"[Network] Broadcasting container lock at {_blockPos}");
                     var packet = NetPackageManager.GetPackage<NetPackagePCLock>().Setup(_blockPos, false);
-                    SingletonMonoBehaviour<ConnectionManager>.Instance.SendPackage(
+                    connManager.SendPackage(
                         (NetPackage)(object)packet, true, -1, -1, -1, null, 192, false);
                 }
             }
             catch (Exception ex)
             {
-                LogWarning($"Error in TELockServer patch: {ex.Message}");
+                LogWarning($"[Network] Error in TELockServer patch: {ex.Message}");
             }
         }
     }
@@ -838,7 +823,8 @@ public class ProxiCraft : IModApi
 
             try
             {
-                if (!SingletonMonoBehaviour<ConnectionManager>.Instance.IsServer)
+                var connManager = SingletonMonoBehaviour<ConnectionManager>.Instance;
+                if (connManager == null || !connManager.IsServer || !connManager.IsConnected)
                     return;
 
                 var tileEntity = _lootEntityId != -1 
@@ -847,9 +833,9 @@ public class ProxiCraft : IModApi
 
                 if (tileEntity != null && !__instance.lockedTileEntities.ContainsKey((ITileEntity)(object)tileEntity))
                 {
-                    LogDebug($"Broadcasting container unlock at {_blockPos}");
+                    LogDebug($"[Network] Broadcasting container unlock at {_blockPos}");
                     var packet = NetPackageManager.GetPackage<NetPackagePCLock>().Setup(_blockPos, true);
-                    SingletonMonoBehaviour<ConnectionManager>.Instance.SendPackage(
+                    connManager.SendPackage(
                         (NetPackage)(object)packet, true, -1, -1, -1, null, 192, false);
                 }
             }

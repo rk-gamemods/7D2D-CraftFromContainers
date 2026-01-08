@@ -1,0 +1,19 @@
+[size=4][b]ProxiCraft v1.2.7[/b][/size]
+
+Network Stability Improvements
+
+[b]Fixed:[/b]
+[list]
+[*]Fixed multiplayer handshake packet loss causing mod to lock up for entire server session
+[*]Added retry mechanism for client handshake (1-second intervals until timeout)
+[*]Added connection state validation before sending network packets
+[*]Improved network diagnostics for troubleshooting
+[*]Improved error handling in packet deserialization
+[/list]
+
+[b]Installation:[/b]
+[list]
+[*]Download ProxiCraft-1.2.7.zip
+[*]Extract to your 7 Days to Die Mods folder
+[*]Result: 7DaysToDie/Mods/ProxiCraft/
+[/list]

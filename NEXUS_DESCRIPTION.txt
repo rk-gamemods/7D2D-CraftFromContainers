@@ -356,6 +356,14 @@ Use only ONE mod of this type.
 
 [size=4][b]Changelog[/b][/size]
 
+[b]v1.2.7[/b]
+[list]
+[*]Fixed multiplayer handshake packet loss causing mod to lock up for entire server session
+[*]Added retry mechanism for client handshake (1-second intervals until timeout)
+[*]Added connection state validation before sending network packets
+[*]Improved network diagnostics for troubleshooting
+[/list]
+
 [b]v1.2.6[/b]
 [list]
 [*]Fixed config settings being overwritten on game load

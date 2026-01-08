@@ -47,6 +47,8 @@ public static class MultiplayerModTracker
     private static DateTime? _handshakeSentTime;
     private static bool _serverResponseReceived;
     private static bool _serverWarningShown;
+    private static int _handshakeRetryCount;           // Number of retry attempts made
+    private static bool _handshakeRetryActive;         // Whether retry coroutine is running
     
     // Configurable timeout - read from config, with fallback
     private static float GetHandshakeTimeout() => 
@@ -78,6 +80,7 @@ public static class MultiplayerModTracker
         public string ConnectionId { get; set; }
         public DateTime JoinTime { get; set; }
         public bool HandshakeReceived { get; set; }
+        public int HandshakeResponsesSent { get; set; } // Track how many times we've responded
     }
 
     /// <summary>
@@ -378,11 +381,19 @@ public static class MultiplayerModTracker
     /// <summary>
     /// Marks a client as having confirmed ProxiCraft (received their handshake).
     /// This is the "innocent verdict" - they can now be trusted.
+    /// Idempotent - safe to call multiple times for retry scenarios.
     /// </summary>
     public static void OnClientHandshakeReceived(int entityId)
     {
         try
         {
+            // Check if already verified (duplicate handshake from retry)
+            if (_verifiedClients.ContainsKey(entityId))
+            {
+                ProxiCraft.LogDebug($"[Multiplayer] Client {entityId} already verified (duplicate handshake - retry scenario)");
+                return; // Idempotent - already processed
+            }
+            
             string playerName = "Unknown";
             
             if (_pendingClients.TryGetValue(entityId, out var pendingInfo))
@@ -522,11 +533,16 @@ public static class MultiplayerModTracker
 
     /// <summary>
     /// Called when we receive a handshake from another player.
+    /// Handles duplicate handshakes gracefully (from retry mechanism).
+    /// Always resends config sync in case previous response was lost.
     /// </summary>
     public static void OnHandshakeReceived(int entityId, string playerName, string modName, string modVersion, List<string> detectedConflicts)
     {
         try
         {
+            // Check if this is a duplicate handshake (from retry mechanism)
+            bool isDuplicate = _playerMods.ContainsKey(entityId) || _verifiedClients.ContainsKey(entityId);
+            
             var info = new PlayerModInfo
             {
                 EntityId = entityId,
@@ -542,23 +558,63 @@ public static class MultiplayerModTracker
             // If we're the host/server, mark this client as confirmed and send them our config
             if (_isHosting || SingletonMonoBehaviour<ConnectionManager>.Instance?.IsServer == true)
             {
+                // Mark as verified (idempotent - safe to call multiple times)
                 OnClientHandshakeReceived(entityId);
                 
-                // Send server config to this client so they use the same settings
+                // ALWAYS resend config sync - in case previous response was lost
+                // This is the key to handling packet loss gracefully
                 var clientInfo = SingletonMonoBehaviour<ConnectionManager>.Instance?.Clients?.ForEntityId(entityId);
                 if (clientInfo != null)
                 {
                     SendConfigToClient(clientInfo);
+                    
+                    // Also resend our handshake response so client knows we got theirs
+                    ResendHandshakeResponse(clientInfo, entityId);
                 }
             }
 
-            ProxiCraft.Log($"[Multiplayer] Player '{info.PlayerName}' joined with {info.ModName} v{info.ModVersion}");
-
-            CheckForConflicts(info);
+            if (isDuplicate)
+            {
+                ProxiCraft.LogDebug($"[Multiplayer] Duplicate handshake from '{info.PlayerName}' (retry) - resent response");
+            }
+            else
+            {
+                ProxiCraft.Log($"[Multiplayer] Player '{info.PlayerName}' joined with {info.ModName} v{info.ModVersion}");
+                CheckForConflicts(info);
+            }
         }
         catch (Exception ex)
         {
-            ProxiCraft.LogDebug($"[Multiplayer] Error in OnHandshakeReceived: {ex.Message}");
+            ProxiCraft.LogWarning($"[Multiplayer] Error in OnHandshakeReceived: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Resends handshake response to a client.
+    /// Used to handle packet loss - if client is retrying, their previous response may have been lost.
+    /// </summary>
+    private static void ResendHandshakeResponse(ClientInfo clientInfo, int clientEntityId)
+    {
+        try
+        {
+            var player = GameManager.Instance?.World?.GetPrimaryPlayer();
+            if (player == null) return;
+
+            var localConflicts = ModCompatibility.GetConflicts()
+                .Select(c => c.ModName)
+                .ToList();
+
+            var packet = NetPackageManager.GetPackage<NetPackagePCHandshake>()
+                .Setup(player.entityId, player.PlayerDisplayName, ProxiCraft.MOD_NAME, ProxiCraft.MOD_VERSION, localConflicts);
+
+            // Send directly to the client who sent us the handshake
+            clientInfo.SendPackage((NetPackage)(object)packet);
+            
+            ProxiCraft.LogDebug($"[Multiplayer] Sent handshake response to '{clientInfo.playerName}'");
+        }
+        catch (Exception ex)
+        {
+            ProxiCraft.LogDebug($"[Multiplayer] ResendHandshakeResponse error: {ex.Message}");
         }
     }
 
@@ -660,6 +716,8 @@ public static class MultiplayerModTracker
             _handshakeSentTime = null;
             _serverResponseReceived = false;
             _serverWarningShown = false;
+            _handshakeRetryCount = 0;
+            _handshakeRetryActive = false;
             _isMultiplayerSession = false;
             _multiplayerUnlocked = false;
             _isHosting = false;
@@ -758,7 +816,8 @@ public static class MultiplayerModTracker
     }
 
     /// <summary>
-    /// Called when we send a handshake to the server. Starts the timeout timer.
+    /// Called when we send a handshake to the server. Starts the retry mechanism.
+    /// Retries every 1 second until response received or timeout reached.
     /// </summary>
     public static void OnHandshakeSent()
     {
@@ -767,38 +826,123 @@ public static class MultiplayerModTracker
             _handshakeSentTime = DateTime.Now;
             _serverResponseReceived = false;
             _serverWarningShown = false;
-            ProxiCraft.LogDebug("[Multiplayer] Handshake sent, waiting for server response...");
+            _handshakeRetryCount = 0;
+            
+            ProxiCraft.Log("[Multiplayer] Handshake sent to server, waiting for response...");
+            
+            // Start retry coroutine if not already running
+            if (!_handshakeRetryActive)
+            {
+                _handshakeRetryActive = true;
+                ThreadManager.StartCoroutine(HandshakeRetryCoroutine());
+            }
         }
-        catch
+        catch (Exception ex)
         {
-            // Silent fail
+            ProxiCraft.LogWarning($"[Multiplayer] OnHandshakeSent error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Coroutine that retries sending handshake every 1 second until response or timeout.
+    /// This handles packet loss on unreliable networks.
+    /// </summary>
+    private static System.Collections.IEnumerator HandshakeRetryCoroutine()
+    {
+        var timeoutSeconds = GetHandshakeTimeout();
+        
+        while (!_serverResponseReceived && !_serverWarningShown)
+        {
+            // Wait 1 second between retries
+            yield return new UnityEngine.WaitForSeconds(1f);
+            
+            // Check if we got a response while waiting
+            if (_serverResponseReceived)
+            {
+                ProxiCraft.LogDebug($"[Multiplayer] Server confirmed after {_handshakeRetryCount} retry attempts");
+                break;
+            }
+            
+            // Check timeout
+            if (_handshakeSentTime.HasValue)
+            {
+                var elapsed = (DateTime.Now - _handshakeSentTime.Value).TotalSeconds;
+                if (elapsed >= timeoutSeconds)
+                {
+                    // Timeout reached - CheckServerResponseTimeout will handle the warning
+                    CheckServerResponseTimeout();
+                    break;
+                }
+            }
+            
+            // Send another handshake (retry)
+            _handshakeRetryCount++;
+            try
+            {
+                var player = GameManager.Instance?.World?.GetPrimaryPlayer();
+                if (player != null && SingletonMonoBehaviour<ConnectionManager>.Instance?.IsConnected == true)
+                {
+                    var localConflicts = ModCompatibility.GetConflicts()
+                        .Select(c => c.ModName)
+                        .ToList();
+
+                    var packet = NetPackageManager.GetPackage<NetPackagePCHandshake>()
+                        .Setup(player.entityId, player.PlayerDisplayName, ProxiCraft.MOD_NAME, ProxiCraft.MOD_VERSION, localConflicts);
+
+                    SingletonMonoBehaviour<ConnectionManager>.Instance.SendToServer(
+                        (NetPackage)(object)packet, false);
+
+                    ProxiCraft.Log($"[Multiplayer] Handshake retry #{_handshakeRetryCount} sent (no response yet, {timeoutSeconds - (DateTime.Now - _handshakeSentTime.Value).TotalSeconds:F0}s until timeout)");
+                }
+            }
+            catch (Exception ex)
+            {
+                ProxiCraft.LogDebug($"[Multiplayer] Handshake retry failed: {ex.Message}");
+            }
+        }
+        
+        _handshakeRetryActive = false;
     }
 
     /// <summary>
     /// Called when we receive ANY handshake response (from server or broadcast).
     /// This confirms the server has ProxiCraft installed and UNLOCKS mod functionality.
+    /// Handles duplicate responses gracefully (idempotent).
     /// </summary>
     public static void OnServerResponseReceived()
     {
         try
         {
+            // Already received - this is a duplicate (possibly from retry), ignore gracefully
+            if (_serverResponseReceived)
+            {
+                ProxiCraft.LogDebug("[Multiplayer] Duplicate server response received (ignored - already confirmed)");
+                return;
+            }
+            
             _serverResponseReceived = true;
             
             // UNLOCK mod functionality - server has ProxiCraft!
             if (_isMultiplayerSession && !_multiplayerUnlocked)
             {
                 _multiplayerUnlocked = true;
-                ProxiCraft.Log("[Multiplayer] Server confirmed ProxiCraft - mod functionality UNLOCKED");
+                if (_handshakeRetryCount > 0)
+                {
+                    ProxiCraft.Log($"[Multiplayer] Server confirmed ProxiCraft after {_handshakeRetryCount} retries - mod functionality UNLOCKED");
+                }
+                else
+                {
+                    ProxiCraft.Log("[Multiplayer] Server confirmed ProxiCraft - mod functionality UNLOCKED");
+                }
             }
             else
             {
                 ProxiCraft.LogDebug("[Multiplayer] Server response received - ProxiCraft confirmed on server");
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Silent fail
+            ProxiCraft.LogWarning($"[Multiplayer] OnServerResponseReceived error: {ex.Message}");
         }
     }
 
@@ -904,6 +1048,7 @@ public static class MultiplayerModTracker
 /// - All read/write operations use defensive null checks
 /// - ProcessPackage is wrapped in try-catch
 /// - Packet processing failure cannot affect other packets or gameplay
+/// - Includes UTC timestamp for latency diagnostics
 /// </summary>
 internal class NetPackagePCHandshake : NetPackage
 {
@@ -912,6 +1057,7 @@ internal class NetPackagePCHandshake : NetPackage
     public string modName = "";
     public string modVersion = "";
     public string detectedConflicts = "";
+    public long timestampUtcTicks; // UTC timestamp for latency tracking
 
     public NetPackagePCHandshake Setup(int entityId, string playerName, string modNameParam, string modVersionParam, IEnumerable<string> conflicts)
     {
@@ -920,6 +1066,7 @@ internal class NetPackagePCHandshake : NetPackage
         modName = modNameParam ?? "Unknown";
         modVersion = modVersionParam ?? "0.0.0";
         detectedConflicts = conflicts != null ? string.Join(",", conflicts) : "";
+        timestampUtcTicks = DateTime.UtcNow.Ticks;
         return this;
     }
 
@@ -933,14 +1080,17 @@ internal class NetPackagePCHandshake : NetPackage
             modName = reader.ReadString() ?? "";
             modVersion = reader.ReadString() ?? "";
             detectedConflicts = reader.ReadString() ?? "";
+            timestampUtcTicks = reader.ReadInt64();
         }
-        catch
+        catch (Exception ex)
         {
             // Failed to read - use defaults
+            ProxiCraft.LogDebug($"[Network] Failed to read handshake packet: {ex.Message}");
             senderName = "";
             modName = "";
             modVersion = "";
             detectedConflicts = "";
+            timestampUtcTicks = 0;
         }
     }
 
@@ -955,16 +1105,23 @@ internal class NetPackagePCHandshake : NetPackage
             writer.Write(modName ?? "");
             writer.Write(modVersion ?? "");
             writer.Write(detectedConflicts ?? "");
+            writer.Write(timestampUtcTicks);
         }
-        catch
+        catch (Exception ex)
         {
             // Write failed - packet will be malformed but won't crash
+            ProxiCraft.LogDebug($"[Network] Failed to write handshake packet: {ex.Message}");
         }
     }
 
     public override int GetLength()
     {
-        return sizeof(int) + 200; // Approximate
+        // Calculate approximate size: int + 4 strings (length prefix + content) + long
+        return sizeof(int) + sizeof(long) + 
+               4 + (senderName?.Length ?? 0) * 2 +
+               4 + (modName?.Length ?? 0) * 2 +
+               4 + (modVersion?.Length ?? 0) * 2 +
+               4 + (detectedConflicts?.Length ?? 0) * 2;
     }
 
     public override void ProcessPackage(World _world, GameManager _callbacks)
@@ -975,6 +1132,23 @@ internal class NetPackagePCHandshake : NetPackage
 
         try
         {
+            // Calculate and log latency if timestamp is valid
+            if (timestampUtcTicks > 0)
+            {
+                var sentTime = new DateTime(timestampUtcTicks, DateTimeKind.Utc);
+                var latencyMs = (DateTime.UtcNow - sentTime).TotalMilliseconds;
+                
+                // Log latency info (always log handshakes since they're infrequent)
+                if (latencyMs > 1000)
+                {
+                    ProxiCraft.LogWarning($"[Network] High latency: Handshake from '{senderName}' took {latencyMs:F0}ms (sent {sentTime:HH:mm:ss.fff} UTC)");
+                }
+                else
+                {
+                    ProxiCraft.Log($"[Network] Handshake from '{senderName}' latency: {latencyMs:F0}ms");
+                }
+            }
+            
             var conflicts = string.IsNullOrEmpty(detectedConflicts)
                 ? new List<string>()
                 : detectedConflicts.Split(',').ToList();
@@ -1011,9 +1185,10 @@ internal class NetPackagePCHandshake : NetPackage
                 senderEntityId,  // Exclude sender
                 -1, -1, null, 192, false);
         }
-        catch
+        catch (Exception ex)
         {
-            // Broadcast failed - not critical
+            // Broadcast failed - not critical, log for diagnostics
+            ProxiCraft.LogWarning($"[Multiplayer] BroadcastToOtherClients failed: {ex.Message}");
         }
     }
 }
