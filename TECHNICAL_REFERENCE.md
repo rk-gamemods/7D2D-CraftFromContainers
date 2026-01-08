@@ -682,3 +682,111 @@ When ANY client connects:
 5. If ANY client lacks mod → stay locked, identify culprit
 
 This approach ensures ZERO crash window - storage is blocked before any unsafe operation can occur.
+
+---
+
+## Crash Prevention Robustness Patterns
+
+### Overview
+
+Even when all players have the mod installed and all safety features are enabled, rare edge cases can cause crashes during container operations. These defensive patterns prevent crashes when the game world changes unexpectedly during item removal.
+
+### Edge Cases Handled
+
+| Edge Case | Cause | Prevention |
+|-----------|-------|------------|
+| TileEntity destroyed mid-operation | Another player breaks block | Check `IsRemoving` before AND after lock acquisition |
+| Chunk unloads during iteration | Player moves away from area | Use `chunk.EnterReadLock()` with proper `finally` block |
+| Items array changes mid-loop | Race condition with game updates | Bounds + null check each iteration |
+| Entity despawns during access | Vehicle/drone removed or moved | Try-catch with automatic stale reference cleanup |
+
+### Implementation Pattern: TileEntity Access
+
+```csharp
+// 1. Pre-check IsRemoving
+if (lootable is TileEntity te && te.IsRemoving)
+    continue;
+
+// 2. Get chunk and acquire read lock
+var chunk = world?.GetChunkFromWorldPos(position) as Chunk;
+if (chunk == null) continue;
+
+chunk.EnterReadLock();
+try
+{
+    // 3. Re-validate after acquiring lock
+    if (lootable is TileEntity te2 && te2.IsRemoving)
+        continue;
+
+    // 4. Defensive bounds check in loop
+    for (int i = 0; i < items.Length && remaining > 0; i++)
+    {
+        if (i >= items.Length || items[i] == null)
+            continue;
+        // ... safe to access items[i]
+    }
+}
+catch (Exception ex)
+{
+    // 5. Log and flag for cleanup
+    LogWarning($"[CrashPrevention] TileEntity error: {ex.GetType().Name}");
+    _storageRefreshNeeded = true;
+}
+finally
+{
+    // 6. ALWAYS release lock - prevents deadlocks
+    chunk.ExitReadLock();
+}
+```
+
+### Implementation Pattern: Entity Storage Access
+
+```csharp
+if (kvp.Value is EntityStorage es)
+{
+    try
+    {
+        // Defensive bounds check
+        for (int i = 0; i < slots.Length && remaining > 0; i++)
+        {
+            if (i >= slots.Length || slots[i] == null)
+                continue;
+            // ... safe to access slots[i]
+        }
+    }
+    catch (Exception esEx)
+    {
+        LogWarning($"[CrashPrevention] EntityStorage error: {esEx.GetType().Name}");
+        _storageRefreshNeeded = true;
+    }
+}
+```
+
+### Automatic Recovery
+
+When a catch block fires:
+1. `_storageRefreshNeeded` flag is set
+2. On next `RefreshStorages()` call, both storage dictionaries are cleared
+3. Full rescan rebuilds with fresh, valid references
+4. Debug log indicates cleanup occurred
+
+### Log Messages
+
+Watch for these in Player.log to diagnose frequency:
+```
+[CrashPrevention] EntityStorage became invalid during item removal at (X,Y,Z): NullReferenceException
+[CrashPrevention] TileEntity error during item removal at (X,Y,Z): InvalidOperationException - message
+[CrashPrevention] Forcing storage refresh due to previous error
+```
+
+### Future Enhancement (Documented)
+
+If crashes persist with EntityStorage, add re-validation per slot:
+```csharp
+for (int i = 0; i < slots.Length && remaining > 0; i++)
+{
+    if (!es.IsValid()) break;  // Re-check each iteration
+    // ...
+}
+```
+Currently not implemented as the try-catch provides sufficient protection.

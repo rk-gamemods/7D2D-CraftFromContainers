@@ -1,16 +1,26 @@
 [size=4][b]ProxiCraft v1.2.7[/b][/size]
 
-Network Stability Improvements
+Network Stability & Robustness Improvements
 
 [b]Fixed:[/b]
 [list]
 [*]Fixed multiplayer handshake packet loss causing mod to lock up for entire server session
 [*]Fixed orphan container locks when players disconnect (containers no longer stay "locked" forever)
 [*]Fixed race condition where out-of-order packets could cause ghost locks
-[*]Added lock expiration (5 min default) - ghost locks self-heal automatically
+[*]Added lock expiration (30s default) - ghost locks self-heal automatically
 [*]Added retry mechanism for handshake and lock broadcasts on connection hiccups
 [*]Added lock retry cancellation to prevent stale locks after rapid open/close
 [*]Improved error handling in packet deserialization
+[/list]
+
+[b]Robustness Improvements:[/b]
+Added defensive measures for rare edge cases that could cause crashes during item removal:
+[list]
+[*]Pre-check TileEntity.IsRemoving before container access (prevents crash if block destroyed mid-operation)
+[*]Chunk read locks with proper finally blocks during TileEntity modification (prevents crash if chunk unloads)
+[*]Defensive bounds and null checks in all item iteration loops (prevents IndexOutOfRange/NullRef)
+[*]Try-catch wrappers for EntityStorage and TileEntity operations with automatic cleanup
+[*]Crash prevention logging with [CrashPrevention] prefix for diagnostics
 [/list]
 
 [b]New Config Option:[/b]

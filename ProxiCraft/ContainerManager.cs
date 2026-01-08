@@ -115,6 +115,10 @@ public static class ContainerManager
     // Flag to force cache refresh (set when containers change)
     private static bool _forceCacheRefresh = true;
     
+    // Flag to force storage refresh after crash prevention catches an error
+    // This clears stale references that may have caused the error
+    private static bool _storageRefreshNeeded = false;
+    
     // ====================================================================================
     // ITEM COUNT CACHE - PERFORMANCE OPTIMIZATION
     // ====================================================================================
@@ -1549,103 +1553,164 @@ public static class ContainerManager
                         continue;
 
                     // Handle EntityStorage (vehicles/drones with live position tracking)
+                    // NOTE: Entity could despawn during iteration. We use try-catch as safety net.
+                    // FUTURE: If crashes persist, add re-validation per slot: if (!es.IsValid()) break;
                     if (kvp.Value is EntityStorage es)
                     {
-                        if (es.Bag != null)
+                        try
                         {
-                            var slots = es.Bag.GetSlots();
-                            if (slots != null)
+                            if (es.Bag != null)
                             {
-                                var lockedSlots = es.Bag.LockedSlots;
-                                for (int i = 0; i < slots.Length && remaining > 0; i++)
+                                var slots = es.Bag.GetSlots();
+                                if (slots != null)
                                 {
-                                    if (config.respectLockedSlots && lockedSlots != null &&
-                                        i < lockedSlots.Length && lockedSlots[i])
-                                        continue;
-                                    if (slots[i]?.itemValue?.type != item.type)
-                                        continue;
-                                    int toRemove = Math.Min(remaining, slots[i].count);
-                                    ProxiCraft.LogDebug($"Removing {toRemove}/{remaining} {item.ItemClass?.GetItemName() ?? "unknown"} from entity storage");
-                                    if (slots[i].count <= toRemove)
-                                        slots[i].Clear();
-                                    else
-                                        slots[i].count -= toRemove;
-                                    remaining -= toRemove;
-                                    removed += toRemove;
-                                    es.Bag.onBackpackChanged();
+                                    var lockedSlots = es.Bag.LockedSlots;
+                                    for (int i = 0; i < slots.Length && remaining > 0; i++)
+                                    {
+                                        // Defensive bounds check - slots array could change
+                                        if (i >= slots.Length || slots[i] == null)
+                                            continue;
+                                        if (config.respectLockedSlots && lockedSlots != null &&
+                                            i < lockedSlots.Length && lockedSlots[i])
+                                            continue;
+                                        if (slots[i].itemValue?.type != item.type)
+                                            continue;
+                                        int toRemove = Math.Min(remaining, slots[i].count);
+                                        ProxiCraft.LogDebug($"Removing {toRemove}/{remaining} {item.ItemClass?.GetItemName() ?? "unknown"} from entity storage");
+                                        if (slots[i].count <= toRemove)
+                                            slots[i].Clear();
+                                        else
+                                            slots[i].count -= toRemove;
+                                        remaining -= toRemove;
+                                        removed += toRemove;
+                                        es.Bag.onBackpackChanged();
+                                    }
+                                }
+                            }
+                            else if (es.LootContainer != null)
+                            {
+                                var lootItems = es.LootContainer.items;
+                                if (lootItems != null)
+                                {
+                                    for (int i = 0; i < lootItems.Length && remaining > 0; i++)
+                                    {
+                                        // Defensive bounds check - lootItems array could change
+                                        if (i >= lootItems.Length || lootItems[i] == null)
+                                            continue;
+                                        if (lootItems[i].itemValue?.type != item.type)
+                                            continue;
+                                        int toRemove = Math.Min(remaining, lootItems[i].count);
+                                        ProxiCraft.LogDebug($"Removing {toRemove}/{remaining} {item.ItemClass?.GetItemName() ?? "unknown"} from entity loot container");
+                                        if (lootItems[i].count <= toRemove)
+                                            lootItems[i].Clear();
+                                        else
+                                            lootItems[i].count -= toRemove;
+                                        remaining -= toRemove;
+                                        removed += toRemove;
+                                    }
                                 }
                             }
                         }
-                        else if (es.LootContainer != null)
+                        catch (Exception esEx)
                         {
-                            var lootItems = es.LootContainer.items;
-                            if (lootItems != null)
-                            {
-                                for (int i = 0; i < lootItems.Length && remaining > 0; i++)
-                                {
-                                    if (lootItems[i]?.itemValue?.type != item.type)
-                                        continue;
-                                    int toRemove = Math.Min(remaining, lootItems[i].count);
-                                    ProxiCraft.LogDebug($"Removing {toRemove}/{remaining} {item.ItemClass?.GetItemName() ?? "unknown"} from entity loot container");
-                                    if (lootItems[i].count <= toRemove)
-                                        lootItems[i].Clear();
-                                    else
-                                        lootItems[i].count -= toRemove;
-                                    remaining -= toRemove;
-                                    removed += toRemove;
-                                }
-                            }
+                            // Entity likely despawned during iteration - log and continue with other containers
+                            ProxiCraft.LogWarning($"[CrashPrevention] EntityStorage became invalid during item removal at {kvp.Key}: {esEx.GetType().Name}");
+                            // Refresh storages to clear stale references
+                            _storageRefreshNeeded = true;
                         }
                         continue;
                     }
 
                     // Handle tile entity lootables (storage crates, etc.)
+                    // CRASH PREVENTION: Check IsRemoving, use chunk locks, wrap in try-catch
                     if (kvp.Value is ITileEntityLootable lootable)
                     {
-                        var items = lootable.items;
-                        if (items == null) continue;
-
-                        // Get locked slots for this container
-                        PackedBoolArray lockedSlots = null;
-                        if (config.respectLockedSlots)
+                        // Skip if tile entity is being destroyed (crash prevention #1)
+                        if (lootable is TileEntity te && te.IsRemoving)
                         {
-                            if (lootable is TEFeatureStorage storage)
-                                lockedSlots = storage.SlotLocks;
-                            else if (lootable is TileEntitySecureLootContainer secureLoot)
-                                lockedSlots = secureLoot.SlotLocks;
+                            ProxiCraft.LogDebug($"Skipping container at {kvp.Key} - TileEntity is being removed");
+                            continue;
                         }
 
-                        for (int i = 0; i < items.Length && remaining > 0; i++)
+                        // Get chunk and acquire read lock (crash prevention #2)
+                        var world = GameManager.Instance?.World;
+                        var chunk = world?.GetChunkFromWorldPos(kvp.Key) as Chunk;
+                        if (chunk == null)
                         {
-                            // Skip locked slots when respectLockedSlots is enabled
-                            if (config.respectLockedSlots && lockedSlots != null &&
-                                i < lockedSlots.Length && lockedSlots[i])
+                            ProxiCraft.LogDebug($"Skipping container at {kvp.Key} - chunk not loaded");
+                            continue;
+                        }
+
+                        chunk.EnterReadLock();
+                        try
+                        {
+                            // Re-validate after acquiring lock (chunk could have unloaded between check and lock)
+                            if (lootable is TileEntity te2 && te2.IsRemoving)
+                            {
+                                ProxiCraft.LogDebug($"Skipping container at {kvp.Key} - TileEntity removed while acquiring lock");
                                 continue;
-
-                            if (items[i]?.itemValue?.type != item.type)
-                                continue;
-
-                            int toRemove = Math.Min(remaining, items[i].count);
-
-                            ProxiCraft.LogDebug($"Removing {toRemove}/{remaining} {item.ItemClass?.GetItemName() ?? "unknown"} from container");
-
-                            if (items[i].count <= toRemove)
-                            {
-                                items[i].Clear();
-                            }
-                            else
-                            {
-                                items[i].count -= toRemove;
                             }
 
-                            remaining -= toRemove;
-                            removed += toRemove;
+                            var items = lootable.items;
+                            if (items == null) continue;
 
-                            // Mark tile entity as modified so it saves
-                            if (lootable is ITileEntity tileEntity)
+                            // Get locked slots for this container
+                            PackedBoolArray lockedSlots = null;
+                            if (config.respectLockedSlots)
                             {
-                                tileEntity.SetModified();
+                                if (lootable is TEFeatureStorage storage)
+                                    lockedSlots = storage.SlotLocks;
+                                else if (lootable is TileEntitySecureLootContainer secureLoot)
+                                    lockedSlots = secureLoot.SlotLocks;
                             }
+
+                            for (int i = 0; i < items.Length && remaining > 0; i++)
+                            {
+                                // Defensive bounds + null check (crash prevention #3)
+                                if (i >= items.Length || items[i] == null)
+                                    continue;
+
+                                // Skip locked slots when respectLockedSlots is enabled
+                                if (config.respectLockedSlots && lockedSlots != null &&
+                                    i < lockedSlots.Length && lockedSlots[i])
+                                    continue;
+
+                                if (items[i].itemValue?.type != item.type)
+                                    continue;
+
+                                int toRemove = Math.Min(remaining, items[i].count);
+
+                                ProxiCraft.LogDebug($"Removing {toRemove}/{remaining} {item.ItemClass?.GetItemName() ?? "unknown"} from container");
+
+                                if (items[i].count <= toRemove)
+                                {
+                                    items[i].Clear();
+                                }
+                                else
+                                {
+                                    items[i].count -= toRemove;
+                                }
+
+                                remaining -= toRemove;
+                                removed += toRemove;
+
+                                // Mark tile entity as modified so it saves
+                                if (lootable is ITileEntity tileEntity)
+                                {
+                                    tileEntity.SetModified();
+                                }
+                            }
+                        }
+                        catch (Exception teEx)
+                        {
+                            // TileEntity likely destroyed during iteration - log and continue with other containers
+                            ProxiCraft.LogWarning($"[CrashPrevention] TileEntity error during item removal at {kvp.Key}: {teEx.GetType().Name} - {teEx.Message}");
+                            // Flag for refresh to clear stale references
+                            _storageRefreshNeeded = true;
+                        }
+                        finally
+                        {
+                            chunk.ExitReadLock();
                         }
                     }
                     else if (kvp.Value is Bag bag)
@@ -1658,12 +1723,16 @@ public static class ContainerManager
 
                         for (int i = 0; i < slots.Length && remaining > 0; i++)
                         {
+                            // Defensive bounds + null check (crash prevention #3)
+                            if (i >= slots.Length || slots[i] == null)
+                                continue;
+
                             // Skip locked slots when respectLockedSlots is enabled
                             if (config.respectLockedSlots && lockedSlots != null &&
                                 i < lockedSlots.Length && lockedSlots[i])
                                 continue;
 
-                            if (slots[i]?.itemValue?.type != item.type)
+                            if (slots[i].itemValue?.type != item.type)
                                 continue;
 
                             int toRemove = Math.Min(remaining, slots[i].count);
@@ -1703,7 +1772,8 @@ public static class ContainerManager
                         
                         for (int i = 0; i < slots.Length && remaining > 0; i++)
                         {
-                            if (slots[i] == null || slots[i].itemValue == null)
+                            // Defensive bounds + null check (crash prevention #3)
+                            if (i >= slots.Length || slots[i] == null || slots[i].itemValue == null)
                             {
                                 ProxiCraft.LogDebug($"  Slot {i}: null or empty");
                                 continue;
@@ -1838,6 +1908,17 @@ public static class ContainerManager
             float dy = playerPos.y - _lastScanPosition.y;
             float dz = playerPos.z - _lastScanPosition.z;
             float distSquared = dx * dx + dy * dy + dz * dz;
+            
+            // If crash prevention flagged a refresh need, force a full rescan to clear stale refs
+            if (_storageRefreshNeeded)
+            {
+                ProxiCraft.LogDebug("[CrashPrevention] Forcing storage refresh due to previous error");
+                _storageRefreshNeeded = false;
+                _forceCacheRefresh = true;
+                // Clear both dicts to force full rebuild
+                _currentStorageDict.Clear();
+                _knownStorageDict.Clear();
+            }
             
             bool shouldRescan = 
                 _forceCacheRefresh ||
