@@ -252,6 +252,37 @@ ProxiCraft is designed to survive game updates:
 <details>
 <summary>Click to expand network flow documentation</summary>
 
+#### Understanding Container Locks
+
+**Important:** ProxiCraft's container lock system is a **UX courtesy**, not crash prevention.
+
+**When are locks created?**
+| Action | Lock Created? | Why |
+|--------|---------------|-----|
+| Player opens container UI (press E) | ✅ YES | Vanilla game creates lock |
+| Player crafts using nearby storage | ❌ NO | No UI opened |
+| Player repairs/upgrades block | ❌ NO | No UI opened |
+| Player reloads weapon | ❌ NO | No UI opened |
+| Player refuels vehicle/generator | ❌ NO | No UI opened |
+
+**What locks protect:**
+- When Player A has a container UI open, ProxiCraft tells other players to **skip** that container
+- This prevents "where did my items go?" confusion when items disappear from an open UI
+- **This is NOT required to prevent crashes** - just for better UX
+
+**What if there were no locks?**
+- Player A opens container, sees 10 concrete
+- Player B repairs a block, ProxiCraft removes 1 concrete from that container
+- Player A's UI still shows 10 until they close and reopen
+- No crash, just mild confusion
+
+**Multiple players using remote features (repair, reload, etc.):**
+- These features **never create locks** because they never open container UIs
+- Multiple players CAN pull from the same storage simultaneously
+- The game processes requests sequentially (single-threaded)
+- If two players need the last item, one gets it, one doesn't - normal resource contention
+- **No crashes, no duplication, no issues**
+
 #### Network Packets
 
 | Packet | Direction | Purpose |
@@ -333,15 +364,16 @@ ProxiCraft is designed to survive game updates:
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│ Lock added at T=0     T=300s (5 min)                           │
+│ Lock added at T=0      T=30s                                   │
 │      │                     │                                   │
 │      ▼                     ▼                                   │
 │  ┌───────┐            ┌───────┐                                │
 │  │LOCKED │────────────│EXPIRED│ → Auto-removed on next access  │
 │  └───────┘            └───────┘                                │
 │                                                                │
-│  Config: containerLockExpirySeconds = 300 (default)            │
-│  Set to 0 to disable expiration (not recommended)              │
+│  Config: containerLockExpirySeconds = 30 (default)             │
+│  30 seconds is plenty for any normal container interaction.    │
+│  Ghost locks self-heal quickly without blocking functionality. │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -414,7 +446,7 @@ If you prefer their versions, check them out! ProxiCraft is a from-scratch imple
 - Fixed multiplayer handshake packet loss causing mod to lock up for entire server session
 - Fixed orphan container locks when players disconnect (containers no longer stay "locked" forever)
 - Fixed race condition where out-of-order packets could cause ghost locks (last-write-wins ordering)
-- Added lock expiration (5 min default) - ghost locks self-heal without intervention
+- Added lock expiration (30 sec default) - ghost locks self-heal quickly
 - Added retry mechanism for handshake and lock broadcasts on temporary connection hiccups
 - Added lock retry cancellation to prevent stale locks after rapid open/close
 - Added network latency diagnostics for troubleshooting slow connections

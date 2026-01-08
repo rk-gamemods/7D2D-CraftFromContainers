@@ -192,11 +192,12 @@ public class ModConfig
 
     /// <summary>
     /// Time in seconds before a container lock automatically expires.
-    /// Prevents "ghost locks" if unlock packets are lost or players disconnect ungracefully.
-    /// Default: 300 seconds (5 minutes) - long enough for normal use, short enough to self-heal.
-    /// Set to 0 to disable expiration (not recommended).
+    /// Locks are a UX courtesy (prevents "where did my items go?" when someone has a container open).
+    /// They are NOT required for crash prevention - just for UI consistency.
+    /// Default: 30 seconds - long enough for any container interaction, short enough to self-heal quickly.
+    /// Set to 0 to disable expiration.
     /// </summary>
-    public float containerLockExpirySeconds = 300f;
+    public float containerLockExpirySeconds = 30f;
 
     // ===========================================
     // DEPRECATED/REMOVED FEATURES
